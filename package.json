@@ -1,0 +1,24 @@
+{
+  "name": "archhive",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "bin": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.3",
+    "node-fetch": "^2.6.0",
+    "open": "^7.0.4",
+    "ora": "^4.0.4",
+    "puppeteer": "^2.1.1",
+    "puppeteer-extra": "^3.1.9",
+    "puppeteer-extra-plugin-adblocker": "^2.11.3",
+    "puppeteer-extra-plugin-stealth": "^2.4.9",
+    "wayback-pagesaver": "^1.0.0",
+    "yargs": "^15.3.1"
+  }
+}

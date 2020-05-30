@@ -56,9 +56,7 @@ async function main() {
   });
 
   const userAgent = (await browser.userAgent()).replace('HeadlessChrome/', 'Chrome/');
-
   const archiveUrls = await reportProgress(archive(argv, userAgent), progress);
-  console.log(archiveUrls);
 
   await reportProgress(screenshot(argv, browser, archiveUrls), progress);
   const output = path.isAbsolute(argv.output)

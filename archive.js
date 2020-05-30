@@ -1,6 +1,6 @@
 const wb = require('wayback-pagesaver');
 const fetch = require('node-fetch');
-const cheerio = require('cheerio');
+const archivetoday = require('archivetoday');
 
 module.exports = async function* archive(argv, userAgent) {
   yield 'Saving to archive.org';
@@ -22,49 +22,14 @@ module.exports = async function* archive(argv, userAgent) {
     });
   });
   yield 'Saving to archive.today';
-  const archiveTodayUrl = await archivetoday({
+  const { url: archiveTodayUrl } = await archivetoday.snapshot({
     url: argv.url,
     userAgent,
-    anyway: argv.force,
+    renew:
+      argv.force ||
+      ((cachedDate) =>
+        new Date().getTime() - cachedDate.getTime() > 1000 * 60 * 60 * 24 * 7 * 12),
+    complete: false,
   });
   yield { url: argv.url, archiveOrgUrl, archiveOrgShortUrl, archiveTodayUrl };
 };
-
-async function archivetoday({
-  url,
-  userAgent,
-  archiveDomain = 'https://archive.today',
-  anyway = false,
-}) {
-  return fetch(archiveDomain)
-    .then((response) => response.text())
-    .then(async (text) => {
-      let $ = cheerio.load(text);
-      let submitid = $(`input[name="submitid"]`).val();
-
-      let response = await fetch(`${archiveDomain}/submit/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': userAgent,
-        },
-        body:
-          'url=' +
-          encodeURIComponent(url) +
-          '&submitid=' +
-          encodeURIComponent(submitid) +
-          '&anyway=' +
-          Number(anyway),
-      });
-      let link;
-      if (response.url.includes('/submit')) {
-        let text = await response.text();
-        let re = /"(https?:\/\/archive\..+?\/.+?)"/;
-        link = text.match(re)[1];
-      } else {
-        link = response.url;
-      }
-      // Because we're creating a screenshot, we don't have to wait; just remove the wip page redirect.
-      return link.replace('/wip/', '/');
-    });
-}

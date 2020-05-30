@@ -1,16 +1,16 @@
 {
   "name": "archhive",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "",
   "main": "index.js",
   "bin": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "",
+  "author": "Tycho Kaster",
   "license": "MIT",
   "dependencies": {
-    "cheerio": "^1.0.0-rc.3",
+    "archivetoday": "^1.0.0",
     "node-fetch": "^2.6.0",
     "open": "^7.0.4",
     "ora": "^4.0.4",

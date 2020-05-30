@@ -22,14 +22,21 @@ module.exports = async function* archive(argv, userAgent) {
     });
   });
   yield 'Saving to archive.today';
-  const { url: archiveTodayUrl } = await archivetoday.snapshot({
-    url: argv.url,
-    userAgent,
-    renew:
-      argv.force ||
-      ((cachedDate) =>
-        new Date().getTime() - cachedDate.getTime() > 1000 * 60 * 60 * 24 * 7 * 12),
-    complete: false,
-  });
+  let archiveTodayUrl;
+  try {
+    archiveTodayUrl = (
+      await archivetoday.snapshot({
+        url: argv.url,
+        userAgent,
+        renew:
+          argv.force ||
+          ((cachedDate) =>
+            new Date().getTime() - cachedDate.getTime() > 1000 * 60 * 60 * 24 * 7 * 12),
+        complete: false,
+      })
+    ).url;
+  } catch (e) {
+    throw new Error('archive.today threw a CAPTCHA. Try again later.');
+  }
   yield { url: argv.url, archiveOrgUrl, archiveOrgShortUrl, archiveTodayUrl };
 };

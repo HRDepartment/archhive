@@ -11,6 +11,7 @@ module.exports = async function* screenshot(argv, browser, archiveUrls) {
     await page.emulateMediaType('print');
   }
 
+  yield 'Adding header';
   // Add archive urls footer
   await page.evaluate(({ url, archiveOrgUrl, archiveOrgShortUrl, archiveTodayUrl }) => {
     const date = new Date();
@@ -64,9 +65,12 @@ module.exports = async function* screenshot(argv, browser, archiveUrls) {
     }
   }, archiveUrls);
 
+  yield 'Ensuring all images are loaded';
+
   try {
     // Load all lazy loading images
-    await page.evaluate(`(async () => {
+    await Promise.race(
+      page.evaluate(`(async () => {
     document.body.scrollIntoView(false);
     await Promise.all(
       Array.from(document.querySelectorAll('img')).map((img) => {
@@ -77,7 +81,9 @@ module.exports = async function* screenshot(argv, browser, archiveUrls) {
         });
       })
     );
-  })()`);
+  })()`),
+      new Promise((resolve) => setTimeout(resolve, 5000))
+    );
   } catch (e) {}
 
   yield 'Taking full-page screenshot';

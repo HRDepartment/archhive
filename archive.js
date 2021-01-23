@@ -1,42 +1,113 @@
-const wb = require('wayback-pagesaver');
 const fetch = require('node-fetch');
-const archivetoday = require('archivetoday');
 
-module.exports = async function* archive(argv, userAgent) {
-  yield 'Saving to archive.org';
-  const archiveOrgUrl = await wb(argv.url);
-  yield `Creating v.gd shortlink: ${archiveOrgUrl}`;
-  let archiveOrgShortUrl = await fetch(
-    `https://v.gd/create.php?format=simple&url=${encodeURIComponent(archiveOrgUrl)}${
-      argv.shorturl ? `&shorturl=${encodeURIComponent(argv.shorturl)}` : ''
+async function* aoArchive({ argv, browser }) {
+  let archiveOrgUrl;
+  let archiveOrgShortUrl;
+
+  if (argv.aoUrl === 'auto') {
+    const page = await browser.newPage();
+    yield 'Submitting URL to archive.org';
+    await page.goto(`https://web.archive.org/save`, {
+      waitUntil: 'domcontentloaded',
+    });
+    await page.evaluate((url) => {
+      document.querySelector('input[name="url"]').value = url;
+      // Don't save error pages
+      document.querySelector('#capture_all').checked = false;
+    }, argv.url);
+    await Promise.all([
+      page.click('form[action="/save"] input[type="submit"]'),
+      page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+    ]);
+    yield 'Waiting for archive.org to crawl...';
+    await page.waitForSelector('#spn-result a', { timeout: 60000 });
+    archiveOrgUrl = await page.evaluate(
+      () => document.querySelector('#spn-result a').href
+    );
+    await page.close();
+  } else if (argv.aoUrl !== 'none') {
+    archiveOrgUrl = argv.aoUrl;
+  }
+
+  if (archiveOrgUrl) {
+    yield `Creating v.gd shortlink: ${archiveOrgUrl}`;
+    archiveOrgShortUrl = await createShortLink(archiveOrgUrl, argv.shortlink);
+    yield 'archive.org';
+  }
+
+  return { archiveOrgUrl, archiveOrgShortUrl };
+}
+
+async function* atArchive({ argv, browser }) {
+  let archiveTodayUrl;
+  if (argv.atUrl === 'auto') {
+    page = await browser.newPage();
+    await page.goto('https://archive.today', { waitUntil: 'domcontentloaded' });
+    await page.evaluate((url) => {
+      document.querySelector('#url').value = url;
+    }, argv.url);
+    await Promise.all([
+      page.click('input[type="submit"][value="save"]'),
+      page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+    ]);
+    const already = await page.$('#DIVALREADY');
+    if (already) {
+      const archivedText = await page.evaluate(
+        () => document.querySelector('span[itemprop="description"]').textContent
+      );
+      const archivedDate = new Date(archivedText.replace('archived ', ''));
+      let rearchive = false;
+      // Check if archivedDate parsed correctly
+      if (archivedDate.getTime()) {
+        if (argv.renew === 'auto') {
+          const ONE_YEAR = 31556952000;
+          if (new Date().getTime() - archivedDate.getTime() > ONE_YEAR) {
+            rearchive = true;
+          }
+        } else if (argv.renew === 'manual') {
+          // TODO: keyboard input
+        }
+      } else {
+        console.error('Could not parse date on archive.today page', { archivedText });
+      }
+
+      if (rearchive) {
+        await Promise.all([
+          page.click('input[type="submit"][value="save"]'),
+          page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+        ]);
+      }
+    }
+
+    archiveTodayUrl = page.url().replace('wip/', '');
+    await page.close();
+    yield 'archive.today';
+  } else if (argv.atUrl !== 'none') {
+    archiveTodayUrl = argv.atUrl;
+  }
+
+  return { archiveTodayUrl };
+}
+
+module.exports = [
+  { site: 'archive.org', exec: aoArchive },
+  { site: 'archive.today', exec: atArchive },
+];
+
+function createShortLink(url, shorturl) {
+  return fetch(
+    `https://v.gd/create.php?format=simple&url=${encodeURIComponent(url)}${
+      shorturl ? `&shorturl=${encodeURIComponent(shorturl)}` : ''
     }`
   ).then((r) => {
     if (r.ok) return r.text();
     // Url already is in use, use it
-    if (argv.shorturl) {
-      console.warn(`v.gd/${argv.shorturl} already exists`);
-      return `https://v.gd/${argv.shorturl}`;
+    if (shorturl) {
+      console.warn(`v.gd/${shorturl} already exists`);
+      return `https://v.gd/${shorturl}`;
     }
     return r.text().then((e) => {
       throw new Error(e);
     });
   });
-  yield 'Saving to archive.today';
-  let archiveTodayUrl;
-  try {
-    archiveTodayUrl = (
-      await archivetoday.snapshot({
-        url: argv.url,
-        userAgent,
-        renew:
-          argv.force ||
-          ((cachedDate) =>
-            new Date().getTime() - cachedDate.getTime() > 1000 * 60 * 60 * 24 * 7 * 12),
-        complete: false,
-      })
-    ).url;
-  } catch (e) {
-    throw new Error('archive.today threw a CAPTCHA. Try again later.');
-  }
-  yield { url: argv.url, archiveOrgUrl, archiveOrgShortUrl, archiveTodayUrl };
-};
+}

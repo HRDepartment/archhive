@@ -57,12 +57,19 @@ const { argv } = require('yargs').options({
   },
   renew: {
     type: 'string',
+    choices: ['auto', 'manual', 'no'],
     describe:
-      '"manual" to manually determine whether to rearchive the link. "auto" (default) automatically determines whether the link is outdated. "never" to never renew',
+      '"no" to always use the latest existing snapshot when possible. "manual" to manually determine whether to rearchive the link. "auto" (default) automatically determines whether the link is outdated. "never" to never renew',
     default: 'auto',
   },
   outputDir: { type: 'string', default: process.cwd() },
   adblock: { type: 'boolean', default: true },
+  noscript: {
+    type: 'boolean',
+    describe:
+      'If passed, JavaScript will be disabled when taking a screenshot. Useful especially for paywall websites and obnoxious popups.',
+    default: false,
+  },
   debug: {
     type: 'string',
     choices: ['all', 'screenshot'],
@@ -134,9 +141,7 @@ async function main() {
       activeArchiveMethods.push(reportProgress(exec({ argv, browser }), progress));
     }
 
-    const archiveResults = (await Promise.allSettled(activeArchiveMethods))
-      .filter(({ status }) => status === 'fulfilled')
-      .map(({ value }) => value);
+    const archiveResults = await Promise.all(activeArchiveMethods);
     for (const result of archiveResults) archiveUrls = { ...archiveUrls, ...result };
 
     progress.prefixText = '';
@@ -154,12 +159,22 @@ async function main() {
     }
 
     progress.succeed('Screenshot');
-    console.log(filename);
+    console.log(`File: ${filename}`);
+    console.log(
+      `archive.org: ${archiveUrls.archiveOrgUrl}${
+        archiveUrls.archiveOrgShortUrl ? ` (${archiveUrls.archiveOrgShortUrl})` : ''
+      }`
+    );
+    console.log(`archive.today: ${archiveUrls.archiveTodayUrl}`);
     if (argv.debug !== 'screenshot') {
       await open(`file://${filename}`);
     }
+    if (argv.debug)
+      console.log(
+        `NOTE: This screenshot was not taken headless, so a scrollbar is visible`
+      );
   } catch (e) {
-    if (argv.debug) console.error(e);
+    console.error(e);
     progress.fail(e.message);
   }
 

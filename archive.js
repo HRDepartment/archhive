@@ -20,10 +20,13 @@ async function* aoArchive({ argv, browser }) {
       page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
     ]);
     yield 'Waiting for archive.org to crawl...';
-    await page.waitForSelector('#spn-result a', { timeout: 60000 });
+    await page.waitForSelector('#spn-result a', { timeout: 70000 });
     archiveOrgUrl = await page.evaluate(
       () => document.querySelector('#spn-result a').href
     );
+    if (archiveOrgUrl === 'https://web.archive.org/save') {
+      throw new Error();
+    }
     await page.close();
   } else if (argv.aoUrl !== 'none') {
     archiveOrgUrl = argv.aoUrl;
@@ -42,6 +45,7 @@ async function* atArchive({ argv, browser }) {
   let archiveTodayUrl;
   if (argv.atUrl === 'auto') {
     page = await browser.newPage();
+    await page.setJavaScriptEnabled(false);
     await page.goto('https://archive.today', { waitUntil: 'domcontentloaded' });
     await page.evaluate((url) => {
       document.querySelector('#url').value = url;
@@ -72,14 +76,19 @@ async function* atArchive({ argv, browser }) {
       }
 
       if (rearchive) {
+        if (argv.debug) console.log(`Rearchiving on archive.today`);
         await Promise.all([
           page.click('input[type="submit"][value="save"]'),
-          page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+          page.waitForNavigation({ waitUntil: 'load' }),
         ]);
       }
     }
 
     archiveTodayUrl = page.url().replace('wip/', '');
+    if (archiveTodayUrl.includes('/submit')) {
+      await new Promise(() => {});
+      throw new Error();
+    }
     await page.close();
     yield 'archive.today';
   } else if (argv.atUrl !== 'none') {

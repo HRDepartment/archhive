@@ -10,7 +10,11 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
   let page = await browser.newPage();
   await page._client.send('Emulation.clearDeviceMetricsOverride');
   await page.setViewport({ width, height });
+  // Need to bypass csp for the inline QR code image and custom stylesheet
   await page.setBypassCSP(true);
+  if (argv.noscript) {
+    await page.setJavaScriptEnabled(false);
+  }
 
   yield `Going to ${argv.url} (Viewport: ${width}x${height})`;
   await page.goto(argv.url, { waitUntil: 'networkidle0' });
@@ -54,7 +58,7 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
       <archhive-header-inner style='display: grid;grid-template:${grid.template};gap:${
         grid.gap
       };font-family: arial;font-size: 20px;'>
-        <img src="${qrcode}" alt="" style="grid-area:qr;">
+        <img src="${qrcode}" alt="" style="grid-area:qr;min-width:140px;">
         <archhive-header-item style="display:flex;flex-direction: column;grid-area:url;">
           <span style="display:block;">
             <span style="color: grey;font-variant: common-ligatures;font-weight: 700;letter-spacing: 0.04em;">URL</span>
@@ -94,17 +98,20 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
   yield 'Ensuring all images are loaded';
 
   try {
+    // JavaScript must be enabled for event listeners to fire
+    await page.setJavaScriptEnabled(true);
     // Load all lazy loading images
-    await Promise.race(
-      await page.evaluate(async () => {
-        // Scroll down to bottom of page to activate lazy loading images
-        document.body.scrollIntoView(false);
+    await page.evaluate(async () => {
+      // Scroll down to bottom of page to activate lazy loading images
+      document.body.scrollIntoView(false);
 
-        // Wait for all remaining lazy loading images to load
-        await Promise.all(
-          Array.from(document.getElementsByTagName('img'), (image) => {
+      // Wait for all remaining lazy loading images to load
+      const images = Array.from(document.getElementsByTagName('img'));
+      await Promise.race([
+        Promise.all(
+          images.map((image) => {
             if (image.complete) {
-              return;
+              return Promise.resolve();
             }
 
             return new Promise((resolve, reject) => {
@@ -112,12 +119,24 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
               image.addEventListener('error', reject);
             });
           })
-        );
+        ),
+        new Promise((resolve) => setTimeout(resolve, 15000)),
+      ]);
 
-        document.body.scrollTo(0, 0);
-      }),
-      new Promise((resolve) => setTimeout(resolve, 10000))
-    );
+      // position:fixed -> position:absolute
+      // For websites with sticky headers
+      const elems = Array.from(document.body.querySelectorAll('nav, header, div'));
+      for (const elem of elems) {
+        if (
+          window.getComputedStyle(elem, null).getPropertyValue('position') === 'fixed'
+        ) {
+          elem.style.position = 'absolute';
+        }
+      }
+
+      // Without this the header will be empty in screenshots due to lazy rendering
+      window.scrollTo(0, 0);
+    });
   } catch (e) {}
 
   yield 'Taking full-page screenshot';

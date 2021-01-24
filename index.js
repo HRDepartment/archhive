@@ -8,8 +8,7 @@ const { argv } = require('yargs').options({
   width: {
     type: 'string',
     describe:
-      'Screenshot viewport width (e.g. 1920) or one of: phone (576), tablet (768), notebook (1200), laptop (1400), desktop (1920)',
-    default: 'laptop',
+      'Screenshot viewport width (e.g. 1920) or one of: mini (492), mobile (576), tablet (768), notebook (1200), laptop (1400, default), desktop (1920)',
   },
   quality: {
     type: 'number',
@@ -82,11 +81,25 @@ const addExifMetadata = require('./exif');
 const launchBrowser = require('./browser');
 const open = require('open');
 const { prompt } = require('enquirer');
+const { VIEWPORT_WIDTH } = require('./util');
 
 async function main() {
   if (!argv.url) {
-    argv.url = await prompt({ type: 'input', message: 'URL:' });
+    argv.url = (await prompt({ type: 'input', message: 'URL:', name: 'url' })).url;
+    if (!argv.width) {
+      argv.width = (
+        await prompt({
+          type: 'select',
+          message: 'Viewport:',
+          name: 'width',
+          choices: Object.keys(VIEWPORT_WIDTH),
+        })
+      ).width;
+    }
   }
+
+  if (!argv.width) argv.width = 'laptop';
+
   if (argv.debug === 'screenshot') {
     if (argv.aoUrl === 'auto') {
       argv.aoUrl = 'archive.org/debug';

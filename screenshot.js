@@ -32,7 +32,15 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
 
   yield 'Adding header';
   const grid = { template: getGridTemplate(width), gap: getGridGap(width) };
-  // Add archive urls footer
+
+  if (!archiveUrls.archiveOrgShortUrl && !archiveUrls.archiveOrgUrl) {
+    console.warn(`warn: Missing archive.org link`);
+  }
+  if (!archiveUrls.archiveTodayUrl) {
+    console.warn(`warn: Missing archive.today link`);
+  }
+
+  // Add archive urls header
   await page.evaluate(
     (
       { url, archiveOrgUrl, archiveOrgShortUrl, archiveTodayUrl },
@@ -41,14 +49,11 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
       stylesheet,
       qrcode
     ) => {
-      // Add header
-      document.body.insertAdjacentHTML(
-        'beforebegin',
-        `
+      const header = `
     <archhive-header style="display:block;background-color: #f7f7f7;border-bottom: 1.5px solid #b4c2d0;padding: 20px 2%;">
       <archhive-header-inner style='display: grid;grid-template:${grid.template};gap:${
-          grid.gap
-        };font-family: arial;font-size: 20px;'>
+        grid.gap
+      };font-family: arial;font-size: 20px;'>
         <img src="${qrcode}" alt="" style="grid-area:qr;">
         <archhive-header-item style="display:flex;flex-direction: column;grid-area:url;">
           <span style="display:block;">
@@ -72,8 +77,8 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
           </span>
         </archhive-header-item>
       </archhive-header-inner>
-    </archhive-header>`
-      );
+    </archhive-header>`;
+      document.head.insertAdjacentHTML('beforebegin', header);
       document.body.innerHTML += `<style>${stylesheet}</style>`;
       function removeProtocol(url = '') {
         return url.replace(/^https?:\/\//, '');
@@ -91,19 +96,27 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
   try {
     // Load all lazy loading images
     await Promise.race(
-      page.evaluate(`(async () => {
-    document.body.scrollIntoView(false);
-    await Promise.all(
-      Array.from(document.querySelectorAll('img')).map((img) => {
-        if (img.complete) return;
-        return new Promise((resolve, reject) => {
-          img.addEventListener('load', resolve);
-          img.addEventListener('error', reject);
-        });
-      })
-    );
-  })()`),
-      new Promise((resolve) => setTimeout(resolve, 5000))
+      await page.evaluate(async () => {
+        // Scroll down to bottom of page to activate lazy loading images
+        document.body.scrollIntoView(false);
+
+        // Wait for all remaining lazy loading images to load
+        await Promise.all(
+          Array.from(document.getElementsByTagName('img'), (image) => {
+            if (image.complete) {
+              return;
+            }
+
+            return new Promise((resolve, reject) => {
+              image.addEventListener('load', resolve);
+              image.addEventListener('error', reject);
+            });
+          })
+        );
+
+        document.body.scrollTo(0, 0);
+      }),
+      new Promise((resolve) => setTimeout(resolve, 10000))
     );
   } catch (e) {}
 

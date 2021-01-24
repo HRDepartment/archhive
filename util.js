@@ -1,10 +1,11 @@
-const VIEWPORT_WIDTH = {
-  phone: 576,
+const VIEWPORT_WIDTH = (module.exports.VIEWPORT_WIDTH = {
+  mini: 492,
+  mobile: 576,
   tablet: 768,
   notebook: 1200,
   laptop: 1400,
   desktop: 1920,
-};
+});
 
 module.exports.getViewport = function (width) {
   let w = 0;

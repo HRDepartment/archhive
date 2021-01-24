@@ -29,9 +29,9 @@ async function* aoArchive({ argv, browser }) {
     archiveOrgUrl = argv.aoUrl;
   }
 
-  if (archiveOrgUrl) {
-    yield `Creating v.gd shortlink: ${archiveOrgUrl}`;
-    archiveOrgShortUrl = await createShortLink(archiveOrgUrl, argv.shortlink);
+  if (archiveOrgUrl && argv.shorturl !== 'none') {
+    yield `Creating v.gd shorturl: ${archiveOrgUrl}`;
+    archiveOrgShortUrl = await createShortURL(archiveOrgUrl, argv.shorturl);
     yield 'archive.org';
   }
 
@@ -94,7 +94,7 @@ module.exports = [
   { site: 'archive.today', exec: atArchive },
 ];
 
-function createShortLink(url, shorturl) {
+function createShortURL(url, shorturl) {
   return fetch(
     `https://v.gd/create.php?format=simple&url=${encodeURIComponent(url)}${
       shorturl ? `&shorturl=${encodeURIComponent(shorturl)}` : ''

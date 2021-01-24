@@ -19,6 +19,7 @@
     "puppeteer-extra-plugin-adblocker": "^2.11.3",
     "puppeteer-extra-plugin-anonymize-ua": "^2.2.15",
     "puppeteer-extra-plugin-stealth": "^2.4.9",
+    "qrcode": "^1.4.4",
     "sanitize-filename": "^1.6.3",
     "wayback-pagesaver": "^1.0.0",
     "yargs": "^16.2.0"

@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const puppeteer = require('puppeteer-extra');
+const { getViewport } = require('./util');
 
 const AnonymizeUAPlugin = require('puppeteer-extra-plugin-anonymize-ua');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
@@ -47,9 +48,15 @@ module.exports = async function launchBrowser(argv) {
     puppeteer.use(AdblockerPlugin);
   }
 
+  const [width, height] = getViewport(argv.width);
+  if (!width) {
+    console.error(`Invalid width specified: ${argv.width}`);
+    process.exit(1);
+  }
+
   const browser = await puppeteer.launch({
     headless: !argv.debug,
-    args: [`--window-size=${argv.width},${argv.height}`],
+    args: [`--window-size=${width},${height}`],
   });
 
   return browser;

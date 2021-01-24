@@ -6,12 +6,10 @@ const { argv } = require('yargs').options({
     default: false,
   },
   width: {
-    type: 'number',
-    default: 1280,
-  },
-  height: {
-    type: 'number',
-    default: 720,
+    type: 'string',
+    describe:
+      'Screenshot viewport width (e.g. 1920) or one of: phone (576), tablet (768), notebook (1200), laptop (1400), desktop (1920)',
+    default: 'laptop',
   },
   quality: {
     type: 'number',
@@ -48,7 +46,7 @@ const { argv } = require('yargs').options({
   shorturl: {
     type: 'string',
     describe:
-      '5-30 characters that will be used as v.gd shorturl of the archive.org link',
+      '5-30 characters that will be used as v.gd shorturl of the archive.org link, or "none" to disable',
   },
   exifComment: {
     type: 'string',
@@ -66,7 +64,12 @@ const { argv } = require('yargs').options({
   },
   outputDir: { type: 'string', default: process.cwd() },
   adblock: { type: 'boolean', default: true },
-  debug: { type: 'boolean', default: false },
+  debug: {
+    type: 'string',
+    choices: ['all', 'screenshot'],
+    describe:
+      'screenshot: Debug the screenshotting process without saving files or archiving a URL.',
+  },
 });
 
 argv.url = argv.url || argv._.join(' ');
@@ -83,6 +86,13 @@ const { prompt } = require('enquirer');
 async function main() {
   if (!argv.url) {
     argv.url = await prompt({ type: 'input', message: 'URL:' });
+  }
+  if (argv.debug === 'screenshot') {
+    if (argv.aoUrl === 'auto') {
+      argv.aoUrl = 'archive.org/debug';
+      argv.shorturl = 'none';
+    }
+    if (argv.atUrl === 'auto') argv.atUrl = 'archive.today/debug';
   }
 
   try {
@@ -123,14 +133,18 @@ async function main() {
       screenshot({ argv, browser, archiveUrls, stylesheet }),
       progress
     );
-    await reportProgress(
-      addExifMetadata({ argv, pageTitle, filename, archiveUrls }),
-      progress
-    );
+    if (argv.debug !== 'screenshot') {
+      await reportProgress(
+        addExifMetadata({ argv, pageTitle, filename, archiveUrls }),
+        progress
+      );
+    }
 
     progress.succeed('Screenshot');
     console.log(filename);
-    await open(`file://${filename}`);
+    if (argv.debug !== 'screenshot') {
+      await open(`file://${filename}`);
+    }
   } catch (e) {
     if (argv.debug) console.error(e);
     progress.fail(e.message);

@@ -12,12 +12,15 @@ module.exports = async function resolveStylesheet(argv) {
   }
 
   try {
-    stylesheet = fs.readFileSync(cssFilename);
+    stylesheet = fs.readFileSync(cssFilename, 'utf8');
   } catch (e) {}
 
   if (stylesheet) {
     stylesheet = stylesheet.replace(AT_IMPORT_RULES, (rule, filename, mediaQueries) => {
-      const subsheet = fs.readFileSync(path.join(path.dirname(cssFilename), filename));
+      const subsheet = fs.readFileSync(
+        path.join(path.dirname(cssFilename), filename),
+        'utf8'
+      );
       if (mediaQueries) {
         return `@media ${mediaQueries} {${subsheet}}`;
       }

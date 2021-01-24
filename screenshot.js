@@ -1,5 +1,9 @@
 const path = require('path');
 const sanitizeFilename = require('sanitize-filename');
+const fs = require('fs');
+const banner_logo = fs.readFileSync(path.join(__dirname, 'banner_logo.png'), {
+  encoding: 'base64',
+});
 
 module.exports = async function* screenshot({ argv, browser, archiveUrls, stylesheet }) {
   let page = await browser.newPage();
@@ -20,13 +24,14 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
     (
       { url, archiveOrgUrl, archiveOrgShortUrl, archiveTodayUrl },
       nowDate,
-      stylesheet
+      stylesheet,
+      banner_logo
     ) => {
       // Add header
       document.body.innerHTML = `
     <archhive-header style="display:block;background-color: #f7f7f7;border-bottom: 1px solid #b4c2d0;padding: 20px 0;">
       <archhive-header-inner style="display: grid;grid-template-columns: min(15.5%, 300px) 40% repeat(auto-fill, min(19%, 246px));gap: 24px;font-family: arial;font-size: 20px;">
-        <img src="https://i.imgur.com/JMJnezT.png" style="height: 58px;margin-left: 10%;">
+        <img src="data:image/png;base64,${banner_logo}" alt="" style="height: 58px;margin-left: 10%;">
         <archhive-header-item style="display:flex;flex-direction: column;">
           <span style="display:block;">
             <span style="color: grey;font-variant: common-ligatures;font-weight: 700;letter-spacing: 0.04em;">URL</span>
@@ -72,7 +77,8 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
     },
     archiveUrls,
     currentDate(),
-    stylesheet
+    stylesheet,
+    banner_logo
   );
 
   yield 'Ensuring all images are loaded';

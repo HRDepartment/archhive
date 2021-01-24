@@ -40,6 +40,11 @@ const { argv } = require('yargs').options({
       'Directory containing stylesheets (files named origin.css, e.g. www.example.com.css) for the screenshot process. @import rules are supported',
     default: path.join(process.cwd(), 'stylesheets'),
   },
+  filters: {
+    type: 'string',
+    describe:
+      'File containing a list of Adblock filters to apply. Almost all filters (cosmetic and network) are supported. Defaults to <stylesheet-dir/filters.txt>',
+  },
   shorturl: {
     type: 'string',
     describe:
@@ -71,22 +76,9 @@ const screenshot = require('./screenshot');
 const archiveMethods = require('./archive');
 const resolveStylesheet = require('./stylesheet');
 const addExifMetadata = require('./exif');
-const puppeteer = require('puppeteer-extra');
+const launchBrowser = require('./browser');
 const open = require('open');
 const { prompt } = require('enquirer');
-
-const AnonymizeUAPlugin = require('puppeteer-extra-plugin-anonymize-ua');
-puppeteer.use(AnonymizeUAPlugin());
-
-// Add stealth plugin and use defaults (all tricks to hide puppeteer usage)
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-puppeteer.use(StealthPlugin());
-
-if (argv.adblock) {
-  // Add adblocker plugin to block all ads and trackers (saves bandwidth)
-  const AdblockerPlugin = require('puppeteer-extra-plugin-adblocker');
-  puppeteer.use(AdblockerPlugin({ blockTrackers: true }));
-}
 
 async function main() {
   if (!argv.url) {
@@ -109,10 +101,7 @@ async function main() {
   }
 
   let progress = ora().start(`Starting browser`);
-  const browser = await puppeteer.launch({
-    headless: !argv.debug,
-    args: [`--window-size=${argv.width},${argv.height}`],
-  });
+  const browser = await launchBrowser(argv);
 
   progress.prefixText = 'Archiving URL';
   try {

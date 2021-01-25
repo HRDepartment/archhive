@@ -20,7 +20,7 @@ async function* aoArchive({ argv, browser }) {
       page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
     ]);
     yield 'Waiting for archive.org to crawl...';
-    await page.waitForSelector('#spn-result a', { timeout: 70000 });
+    await page.waitForSelector('#spn-result a', { timeout: 120000 });
     archiveOrgUrl = await page.evaluate(
       () => document.querySelector('#spn-result a').href
     );
@@ -83,21 +83,21 @@ async function* atArchive({ argv, browser }) {
           page.click('input[type="submit"][value="save"]'),
           page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
         ]);
-        // Redirect page or captcha
-        if (page.url().includes('/submit')) {
-          const pageHTML = (await page.evaluate(() => document.body.innerHTML)) || '';
-          const wipUrlMatch = pageHTML.match(/document\.location\.replace\("(.*?)"\)/);
-          if (wipUrlMatch?.[1]) {
-            archiveTodayUrl = wipUrlMatch[1];
-          }
-        }
       }
     }
 
     if (!archiveTodayUrl) {
       archiveTodayUrl = page.url();
       if (archiveTodayUrl.includes('/submit')) {
-        throw new Error();
+        // Redirect page or captcha
+        const pageHTML = (await page.evaluate(() => document.body.innerHTML)) || '';
+        const wipUrlMatch = pageHTML.match(/document\.location\.replace\("(.*?)"\)/);
+        if (wipUrlMatch?.[1]) {
+          archiveTodayUrl = wipUrlMatch[1];
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 10000));
+          throw new Error();
+        }
       }
     }
 

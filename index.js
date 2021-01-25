@@ -3,6 +3,7 @@ const path = require('path');
 const { argv } = require('yargs').options({
   print: {
     type: 'boolean',
+    describe: "Whether to use the page's print stylesheet",
     default: false,
   },
   width: {
@@ -10,7 +11,14 @@ const { argv } = require('yargs').options({
     describe:
       'Screenshot viewport width (e.g. 1920) or one of: mini (492), mobile (576), tablet (768), notebook (1200), laptop (1400, default), desktop (1920)',
   },
-  quality: {
+  screenshot: {
+    type: 'string',
+    choice: ['fullpage', 'stitched', 'none'],
+    describe:
+      "Screenshot method to use.\nfullpage (default): Take a screenshot of the page in one go. Does not work with very tall pages. Unresponsive pages with a horizontal scrollbar will override the viewport's width for the screenshot.\nstitched: Stitch together screenshots of the page by scrolling down the height of the viewport. Certain sticky elements may cause issues, especially when scripting is enabled, which must be fixed manually with a stylesheet. An image optimizer such as JPEGOptim (with -m90 --strip-none to maintain EXIF data) should be run manually afterwards.\nnone: Do not take a screenshot.",
+    default: 'fullpage',
+  },
+  screenshotQuality: {
     type: 'number',
     default: 90,
   },

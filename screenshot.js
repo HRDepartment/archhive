@@ -1,7 +1,7 @@
 const path = require('path');
 const sanitizeFilename = require('sanitize-filename');
-const fs = require('fs');
 const QRCode = require('qrcode');
+const { default: fullPageScreenshot } = require('puppeteer-full-page-screenshot');
 
 const { getViewport } = require('./util');
 
@@ -32,6 +32,51 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
   const qrcode = await QRCode.toDataURL(actualUrl, {
     margin: 0,
     color: { light: '#f7f7f7' },
+  });
+
+  yield 'Ensuring all images are loaded';
+
+  // JavaScript must be enabled for event listeners to fire
+  await page.setJavaScriptEnabled(true);
+  // Load all lazy loading images
+  await page.evaluate(async () => {
+    // Scroll down to bottom of page to activate lazy loading images
+    document.body.scrollIntoView(false);
+
+    // Wait for all remaining lazy loading images to load
+    const images = Array.from(document.getElementsByTagName('img'));
+    await Promise.race([
+      Promise.all(
+        images.map((image) => {
+          if (image.complete) {
+            return Promise.resolve();
+          }
+
+          return new Promise((resolve) => {
+            image.addEventListener('load', resolve);
+            image.addEventListener('error', resolve);
+          });
+        })
+      ),
+      new Promise((resolve) => setTimeout(resolve, 15000)),
+    ]);
+
+    // position:fixed -> position:absolute
+    // For websites with sticky headers
+    const elems = Array.from(document.body.querySelectorAll('nav, header, div'));
+    for (const elem of elems) {
+      if (window.getComputedStyle(elem, null).getPropertyValue('position') === 'fixed') {
+        elem.style.position = 'absolute';
+        elem.style.top = elem.style.left = elem.style.right = elem.style.bottom =
+          'initial';
+      }
+    }
+
+    // Disable weird rules present on some pages
+    document.body.style.paddingTop = document.body.style.marginTop = 0;
+
+    // Without this the header will be empty in screenshots due to lazy rendering
+    window.scrollTo(0, 0);
   });
 
   yield 'Adding header';
@@ -95,61 +140,38 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
     qrcode
   );
 
-  yield 'Ensuring all images are loaded';
-
-  // JavaScript must be enabled for event listeners to fire
-  await page.setJavaScriptEnabled(true);
-  // Load all lazy loading images
-  await page.evaluate(async () => {
-    // Scroll down to bottom of page to activate lazy loading images
-    document.body.scrollIntoView(false);
-
-    // Wait for all remaining lazy loading images to load
-    const images = Array.from(document.getElementsByTagName('img'));
-    await Promise.race([
-      Promise.all(
-        images.map((image) => {
-          if (image.complete) {
-            return Promise.resolve();
-          }
-
-          return new Promise((resolve) => {
-            image.addEventListener('load', resolve);
-            image.addEventListener('error', resolve);
-          });
-        })
-      ),
-      new Promise((resolve) => setTimeout(resolve, 15000)),
-    ]);
-
-    // position:fixed -> position:absolute
-    // For websites with sticky headers
-    const elems = Array.from(document.body.querySelectorAll('nav, header, div'));
-    for (const elem of elems) {
-      if (window.getComputedStyle(elem, null).getPropertyValue('position') === 'fixed') {
-        elem.style.position = 'absolute';
-        elem.style.top = elem.style.left = elem.style.right = elem.style.bottom =
-          'initial';
-      }
-    }
-
-    // Disable weird rules present on some pages
-    document.body.style.paddingTop = document.body.style.marginTop = 0;
-
-    // Without this the header will be empty in screenshots due to lazy rendering
-    window.scrollTo(0, 0);
-  });
-
   yield 'Taking full-page screenshot';
   const pageTitle = await page.title();
   const filename = path.join(argv.outputDir, titleToFilename(pageTitle) + '.jpg');
 
   if (argv.debug !== 'screenshot') {
-    await page.screenshot({
-      path: filename,
-      fullPage: true,
-      quality: argv.quality,
-    });
+    const quality = argv.screenshotQuality;
+    const { pageWidth, pageHeight } = await page.evaluate(() => [
+      document.documentElement.scrollWidth,
+      document.documentElement.scrollHeight,
+    ]);
+    if (argv.screenshot === 'fullpage') {
+      // Hardcoded limit in Chrome. See https://github.com/puppeteer/puppeteer/issues/359
+      if (pageHeight > 16384) {
+        argv.screenshot = 'stitched';
+        console.warn(
+          `warn: The page's height is ${pageHeight}px which is greater than the 'fullpage' limit of 16384px. --screenshot stitched will be used instead. Remember to manually optimize the resulting .jpg.`
+        );
+      } else if (pageWidth > width) {
+        console.warn(
+          `warn: The screenshot will be stretched to a width of ${pageWidth}px (was: ${width}px) as the page is not responsive. Use --screenshot stitched if this is undesirable.`
+        );
+      }
+    }
+    if (argv.screenshot === 'fullpage') {
+      await page.screenshot({
+        path: filename,
+        fullPage: true,
+        quality,
+      });
+    } else if (argv.screenshot === 'stitched') {
+      await fullPageScreenshot(page, { path: filename }, quality);
+    }
   }
 
   if (argv.debug) {

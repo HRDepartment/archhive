@@ -17,7 +17,7 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
   }
 
   yield `Going to ${argv.url} (Viewport: ${width}x${height})`;
-  await page.goto(argv.url, { waitUntil: 'networkidle0' });
+  await page.goto(argv.url, { waitUntil: 'networkidle0', timeout: 60000 });
   if (argv.print) {
     console.info('Using print media for screenshot');
     await page.emulateMediaType('print');
@@ -54,7 +54,7 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
       qrcode
     ) => {
       const header = `
-    <archhive-header style="display:block;background-color: #f7f7f7;border-bottom: 1.5px solid #b4c2d0;padding: 20px 2%;">
+    <archhive-header style="display:block;background-color: #f7f7f7;border-bottom: 1.5px solid #b4c2d0;padding: 20px 2%;line-height: normal;">
       <archhive-header-inner style='display: grid;grid-template:${grid.template};gap:${
         grid.gap
       };font-family: arial;font-size: 20px;'>
@@ -97,54 +97,52 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
 
   yield 'Ensuring all images are loaded';
 
-  try {
-    // JavaScript must be enabled for event listeners to fire
-    await page.setJavaScriptEnabled(true);
-    // Load all lazy loading images
-    await page.evaluate(async () => {
-      // Scroll down to bottom of page to activate lazy loading images
-      document.body.scrollIntoView(false);
+  // JavaScript must be enabled for event listeners to fire
+  await page.setJavaScriptEnabled(true);
+  // Load all lazy loading images
+  await page.evaluate(async () => {
+    // Scroll down to bottom of page to activate lazy loading images
+    document.body.scrollIntoView(false);
 
-      // Wait for all remaining lazy loading images to load
-      const images = Array.from(document.getElementsByTagName('img'));
-      await Promise.race([
-        Promise.all(
-          images.map((image) => {
-            if (image.complete) {
-              return Promise.resolve();
-            }
+    // Wait for all remaining lazy loading images to load
+    const images = Array.from(document.getElementsByTagName('img'));
+    await Promise.race([
+      Promise.all(
+        images.map((image) => {
+          if (image.complete) {
+            return Promise.resolve();
+          }
 
-            return new Promise((resolve, reject) => {
-              image.addEventListener('load', resolve);
-              image.addEventListener('error', reject);
-            });
-          })
-        ),
-        new Promise((resolve) => setTimeout(resolve, 15000)),
-      ]);
+          return new Promise((resolve) => {
+            image.addEventListener('load', resolve);
+            image.addEventListener('error', resolve);
+          });
+        })
+      ),
+      new Promise((resolve) => setTimeout(resolve, 15000)),
+    ]);
 
-      // position:fixed -> position:absolute
-      // For websites with sticky headers
-      const elems = Array.from(document.body.querySelectorAll('nav, header, div'));
-      for (const elem of elems) {
-        if (
-          window.getComputedStyle(elem, null).getPropertyValue('position') === 'fixed'
-        ) {
-          elem.style.position = 'absolute';
-        }
+    // position:fixed -> position:absolute
+    // For websites with sticky headers
+    const elems = Array.from(document.body.querySelectorAll('nav, header, div'));
+    for (const elem of elems) {
+      if (window.getComputedStyle(elem, null).getPropertyValue('position') === 'fixed') {
+        elem.style.position = 'absolute';
+        elem.style.top = elem.style.left = elem.style.right = elem.style.bottom =
+          'initial';
       }
+    }
 
-      // Without this the header will be empty in screenshots due to lazy rendering
-      window.scrollTo(0, 0);
-    });
-  } catch (e) {}
+    // Disable weird rules present on some pages
+    document.body.style.paddingTop = document.body.style.marginTop = 0;
+
+    // Without this the header will be empty in screenshots due to lazy rendering
+    window.scrollTo(0, 0);
+  });
 
   yield 'Taking full-page screenshot';
   const pageTitle = await page.title();
-  const filename = path.join(
-    argv.outputDir,
-    sanitizeFilename(pageTitle, { replacement: '_' }) + '.jpg'
-  );
+  const filename = path.join(argv.outputDir, titleToFilename(pageTitle) + '.jpg');
 
   if (argv.debug !== 'screenshot') {
     await page.screenshot({
@@ -198,4 +196,24 @@ function getGridTemplate(width) {
 function getGridGap(width) {
   if (width >= 650) return '24px';
   return '8px';
+}
+
+const TITLE_REPLACEMENTS = {
+  '"': '”',
+  '-': '‐',
+  '|': '∣',
+  '*': '＊',
+  '/': '／',
+  '>': '＜',
+  '<': '＞',
+  ':': '∶',
+  '\\': '∖',
+  '?': '？',
+  '.': '．',
+};
+function titleToFilename(title) {
+  for (const char in TITLE_REPLACEMENTS) {
+    title = title.replace(new RegExp(`\\${char}`), TITLE_REPLACEMENTS[char]);
+  }
+  return sanitizeFilename(title);
 }

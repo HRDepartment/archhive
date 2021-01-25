@@ -25,6 +25,7 @@ async function* aoArchive({ argv, browser }) {
       () => document.querySelector('#spn-result a').href
     );
     if (archiveOrgUrl === 'https://web.archive.org/save') {
+      await new Promise((resolve) => setTimeout(resolve, 10000));
       throw new Error();
     }
     await page.close();
@@ -76,19 +77,31 @@ async function* atArchive({ argv, browser }) {
       }
 
       if (rearchive) {
-        if (argv.debug) console.log(`Rearchiving on archive.today`);
+        if (argv.debug) console.log('Rearchiving on archive.today');
+        // const urlBefore = page.url(); TODO: captcha
         await Promise.all([
           page.click('input[type="submit"][value="save"]'),
-          page.waitForNavigation({ waitUntil: 'load' }),
+          page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
         ]);
+        // Redirect page or captcha
+        if (page.url().includes('/submit')) {
+          const pageHTML = (await page.evaluate(() => document.body.innerHTML)) || '';
+          const wipUrlMatch = pageHTML.match(/document\.location\.replace\("(.*?)"\)/);
+          if (wipUrlMatch?.[1]) {
+            archiveTodayUrl = wipUrlMatch[1];
+          }
+        }
       }
     }
 
-    archiveTodayUrl = page.url().replace('wip/', '');
-    if (archiveTodayUrl.includes('/submit')) {
-      await new Promise(() => {});
-      throw new Error();
+    if (!archiveTodayUrl) {
+      archiveTodayUrl = page.url();
+      if (archiveTodayUrl.includes('/submit')) {
+        throw new Error();
+      }
     }
+
+    archiveTodayUrl = archiveTodayUrl.replace('wip/', '');
     await page.close();
     yield 'archive.today';
   } else if (argv.atUrl !== 'none') {

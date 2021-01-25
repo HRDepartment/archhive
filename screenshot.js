@@ -34,33 +34,38 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
     color: { light: '#f7f7f7' },
   });
 
-  yield 'Ensuring all images are loaded';
-
-  // JavaScript must be enabled for event listeners to fire
-  await page.setJavaScriptEnabled(true);
   // Load all lazy loading images
+  yield 'Ensuring all images are loaded';
+  // When noscript is enabled, event listeners will not fire, so we just have to wait the full duration
+  if (argv.noscript) {
+    await new Promise((resolve) => setTimeout(resolve, 15000));
+  } else {
+    await page.evaluate(async (noscript) => {
+      // Scroll down to bottom of page to activate lazy loading images
+      document.body.scrollIntoView(false);
+
+      // Wait for all remaining lazy loading images to load
+      const images = Array.from(document.getElementsByTagName('img'));
+      await Promise.race([
+        Promise.all(
+          images.map((image) => {
+            if (image.complete) {
+              return Promise.resolve();
+            }
+
+            return new Promise((resolve) => {
+              image.addEventListener('load', resolve);
+              image.addEventListener('error', resolve);
+            });
+          })
+        ),
+        new Promise((resolve) => setTimeout(resolve, 15000)),
+      ]);
+    });
+  }
+
+  // Various compatibility fixes
   await page.evaluate(async () => {
-    // Scroll down to bottom of page to activate lazy loading images
-    document.body.scrollIntoView(false);
-
-    // Wait for all remaining lazy loading images to load
-    const images = Array.from(document.getElementsByTagName('img'));
-    await Promise.race([
-      Promise.all(
-        images.map((image) => {
-          if (image.complete) {
-            return Promise.resolve();
-          }
-
-          return new Promise((resolve) => {
-            image.addEventListener('load', resolve);
-            image.addEventListener('error', resolve);
-          });
-        })
-      ),
-      new Promise((resolve) => setTimeout(resolve, 15000)),
-    ]);
-
     // position:fixed -> position:absolute
     // For websites with sticky headers
     const elems = Array.from(document.body.querySelectorAll('nav, header, div'));
@@ -89,7 +94,7 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
     console.warn(`warn: Missing archive.today link`);
   }
 
-  // Add archive urls header
+  // Add archive urls header. Should be done after image load
   await page.evaluate(
     (
       { url, archiveOrgUrl, archiveOrgShortUrl, archiveTodayUrl },
@@ -235,7 +240,7 @@ const TITLE_REPLACEMENTS = {
 };
 function titleToFilename(title) {
   for (const char in TITLE_REPLACEMENTS) {
-    title = title.replace(new RegExp(`\\${char}`), TITLE_REPLACEMENTS[char]);
+    title = title.replace(new RegExp(`\\${char}`, 'g'), TITLE_REPLACEMENTS[char]);
   }
   return sanitizeFilename(title);
 }

@@ -71,7 +71,6 @@ const { argv } = require('yargs').options({
     default: 'auto',
   },
   outputDir: { type: 'string', default: process.cwd() },
-  adblock: { type: 'boolean', default: true },
   noscript: {
     type: 'boolean',
     describe:

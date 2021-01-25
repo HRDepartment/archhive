@@ -6,6 +6,7 @@ async function* aoArchive({ argv, browser }) {
 
   if (argv.aoUrl === 'auto') {
     const page = await browser.newPage();
+    await blockResources(page, ['image']);
     yield 'Submitting URL to archive.org';
     await page.goto(`https://web.archive.org/save`, {
       waitUntil: 'domcontentloaded',
@@ -46,16 +47,40 @@ async function* atArchive({ argv, browser }) {
   let archiveTodayUrl;
   if (argv.atUrl === 'auto') {
     page = await browser.newPage();
+    // Disable image loading so the browser doesn't crash when loading a snapshot
+    await blockResources(page, ['image']);
     await page.setJavaScriptEnabled(false);
     await page.goto('https://archive.today', { waitUntil: 'domcontentloaded' });
     await page.evaluate((url) => {
       document.querySelector('#url').value = url;
     }, argv.url);
-    await Promise.all([
-      page.click('input[type="submit"][value="save"]'),
-      page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
-    ]);
-    const already = await page.$('#DIVALREADY');
+    try {
+      await Promise.all([
+        page.click('input[type="submit"][value="save"]'),
+        page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+      ]);
+    } catch (e) {
+      const currentUrl = page.url();
+      if (argv.debug) console.error(e);
+      const useArchived = (yield {
+        prompt: {
+          type: 'confirm',
+          message: `A crash occurred while loading archive.today, but an archived copy already exists which can be used (${currentUrl}). Would you like to use it?`,
+          name: 'continue',
+          initial: true,
+        },
+      }).continue;
+      if (useArchived) {
+        await page.close();
+        return { archiveTodayUrl: currentUrl };
+      }
+      throw e;
+    }
+
+    const originalUrl = page.url();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    console.log({ originalUrl }, page.url());
+    const already = await page.evaluate(() => !!document.getElementById('DIVALREADY'));
     if (already) {
       const archivedText = await page.evaluate(
         () => document.querySelector('span[itemprop="description"]').textContent
@@ -78,24 +103,59 @@ async function* atArchive({ argv, browser }) {
 
       if (rearchive) {
         if (argv.debug) console.log('Rearchiving on archive.today');
-        // const urlBefore = page.url(); TODO: captcha
-        await Promise.all([
-          page.click('input[type="submit"][value="save"]'),
-          page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
-        ]);
+        try {
+          await Promise.all([
+            page.click('input[type="submit"][value="save"]'),
+            page.waitForNavigation({ waitUntil: 'domcontentloaded' }, { timeout: 10000 }),
+          ]);
+        } catch (e) {
+          if (argv.debug) console.error(e);
+          const useArchived = (yield {
+            prompt: {
+              type: 'confirm',
+              message: `Could not rearchive on archive.today, but an archived copy already exists (${originalUrl}). Would you like to use it?`,
+              name: 'continue',
+              initial: true,
+            },
+          }).continue;
+          if (useArchived) archiveTodayUrl = originalUrl;
+          else throw e;
+        }
+        console.log(page.url());
       }
     }
 
     if (!archiveTodayUrl) {
       archiveTodayUrl = page.url();
       if (archiveTodayUrl.includes('/submit')) {
+        const pageTitle = await page.title();
+        // CAPTCHA
+        if (pageTitle === 'Attention Required!') {
+          if (originalUrl.includes('/submit')) {
+            throw new Error('archive.today is throwing a CAPTCHA when archiving links');
+          } else {
+            const useArchived = (yield {
+              prompt: {
+                type: 'confirm',
+                message: `archive.today is throwing a CAPTCHA, but an archived copy already exists (${originalUrl}). Would you like to use it?`,
+                name: 'continue',
+                initial: true,
+              },
+            }).continue;
+            if (useArchived) {
+              await page.close();
+              return { archiveTodayUrl: originalUrl };
+            }
+          }
+        }
+
         // Redirect page or captcha
         const pageHTML = (await page.evaluate(() => document.body.innerHTML)) || '';
         const wipUrlMatch = pageHTML.match(/document\.location\.replace\("(.*?)"\)/);
         if (wipUrlMatch?.[1]) {
           archiveTodayUrl = wipUrlMatch[1];
         } else {
-          await new Promise((resolve) => setTimeout(resolve, 10000));
+          if (argv.debug) await new Promise((resolve) => setTimeout(resolve, 10000));
           throw new Error();
         }
       }
@@ -131,5 +191,17 @@ function createShortURL(url, shorturl) {
     return r.text().then((e) => {
       throw new Error(e);
     });
+  });
+}
+
+async function blockResources(page, blocked) {
+  // Give the listener some time to register
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  // Remove adblocker request handler
+  // https://github.com/cliqz-oss/adblocker/blob/master/packages/adblocker-puppeteer/adblocker.ts
+  page.removeAllListeners('request');
+  page.on('request', async (request) => {
+    if (blocked.includes(request.resourceType())) request.abort();
+    else request.continue();
   });
 }

@@ -34,9 +34,10 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
     color: { light: '#f7f7f7' },
   });
 
-  // Load all lazy loading images. Not required for noscript; networkidle0 takes care of it
-  if (!argv.noscript) {
-    yield 'Ensuring all images are loaded';
+  yield 'Ensuring all images are loaded';
+  if (argv.noscript) {
+    await new Promise((resolve) => setTimeout(resolve, 7000));
+  } else {
     await page.evaluate(async () => {
       // Scroll down to bottom of page to activate lazy loading images
       document.body.scrollIntoView(false);

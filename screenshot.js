@@ -34,13 +34,10 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
     color: { light: '#f7f7f7' },
   });
 
-  // Load all lazy loading images
-  yield 'Ensuring all images are loaded';
-  // When noscript is enabled, event listeners will not fire, so we just have to wait the full duration
-  if (argv.noscript) {
-    await new Promise((resolve) => setTimeout(resolve, 15000));
-  } else {
-    await page.evaluate(async (noscript) => {
+  // Load all lazy loading images. Not required for noscript; networkidle0 takes care of it
+  if (!argv.noscript) {
+    yield 'Ensuring all images are loaded';
+    await page.evaluate(async () => {
       // Scroll down to bottom of page to activate lazy loading images
       document.body.scrollIntoView(false);
 
@@ -64,6 +61,7 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
     });
   }
 
+  yield 'Fixing page layout';
   // Various compatibility fixes
   await page.evaluate(async () => {
     // position:fixed -> position:absolute
@@ -71,15 +69,17 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
     const elems = Array.from(document.body.querySelectorAll('nav, header, div'));
     for (const elem of elems) {
       if (window.getComputedStyle(elem, null).getPropertyValue('position') === 'fixed') {
-        elem.style.position = 'absolute';
-        elem.style.top = elem.style.left = elem.style.right = elem.style.bottom =
-          'initial';
+        // Some pages will set !important rules which we must override with setProperty
+        elem.style.setProperty('position', 'absolute', 'important');
+        elem.style.setProperty('inset', 'initial', 'important');
       }
     }
 
     // Disable weird rules present on some pages
-    document.body.style.paddingTop = document.body.style.marginTop = 0;
-
+    document.body.style.setProperty('paddingTop', '0', 'important');
+    document.body.style.setProperty('marginTop', '0', 'important');
+    // Ensure scrollbar is disabled
+    document.body.innerHTML += `<style>html::-webkit-scrollbar {width: 0;height: 0;}</style>`;
     // Without this the header will be empty in screenshots due to lazy rendering
     window.scrollTo(0, 0);
   });
@@ -96,7 +96,7 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
 
   // Add archive urls header. Should be done after image load
   await page.evaluate(
-    (
+    async (
       { url, archiveOrgUrl, archiveOrgShortUrl, archiveTodayUrl },
       grid,
       nowDate,
@@ -108,13 +108,13 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
       <archhive-header-inner style='display: grid;grid-template:${grid.template};gap:${
         grid.gap
       };font-family: arial;font-size: 20px;'>
-        <img src="${qrcode}" alt="" style="grid-area:qr;min-width:140px;">
+        <img src="${qrcode}" alt="" style="grid-area:qr;min-width:140px;max-width:100%">
         <archhive-header-item style="display:flex;flex-direction: column;grid-area:url;">
           <span style="display:block;">
             <span style="color: grey;font-variant: common-ligatures;font-weight: 700;letter-spacing: 0.04em;">URL</span>
             ${nowDate}
           </span>
-          <span style="display:block;font-family:courier">
+          <span style="display:block;font-family:courier;overflow-wrap: anywhere;">
             ${removeProtocol(url)}
           </span>
         </archhive-header-item>
@@ -236,7 +236,6 @@ const TITLE_REPLACEMENTS = {
   ':': '∶',
   '\\': '∖',
   '?': '？',
-  '.': '．',
 };
 function titleToFilename(title) {
   for (const char in TITLE_REPLACEMENTS) {

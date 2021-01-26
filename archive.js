@@ -1,4 +1,5 @@
 const fetch = require('node-fetch');
+const { wait } = require('./util');
 
 async function* aoArchive({ argv, browser }) {
   let archiveOrgUrl;
@@ -8,9 +9,20 @@ async function* aoArchive({ argv, browser }) {
     const page = await browser.newPage();
     await blockResources(page, ['image']);
     yield 'Submitting URL to archive.org';
-    await page.goto(`https://web.archive.org/save`, {
-      waitUntil: 'domcontentloaded',
-    });
+    let savePageLoaded = false;
+    while (!savePageLoaded) {
+      const saveResponse = await page.goto(`https://web.archive.org/save`, {
+        waitUntil: 'load',
+      });
+      if (saveResponse.status() !== 200) {
+        console.error(
+          `Could not load https://web.archive.org/save: ${saveResponse.statusText()}. Retrying in 1s...`
+        );
+        await wait(1000);
+      } else {
+        savePageLoaded = true;
+      }
+    }
     await page.evaluate((url) => {
       document.querySelector('input[name="url"]').value = url;
       // Don't save error pages
@@ -18,7 +30,7 @@ async function* aoArchive({ argv, browser }) {
     }, argv.url);
     await Promise.all([
       page.click('form[action="/save"] input[type="submit"]'),
-      page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+      page.waitForNavigation({ waitUntil: 'load' }),
     ]);
     yield 'Waiting for archive.org to crawl...';
     await page.waitForSelector('#spn-result a', { timeout: 120000 });
@@ -78,8 +90,11 @@ async function* atArchive({ argv, browser }) {
     }
 
     const originalUrl = page.url();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    console.log({ originalUrl }, page.url());
+    // Due to a race condition the archiver will crash (because of archive.today's navigation) while we are still on the /submit page
+    // A timeout fixes this and gives time to navigate to the /wip/ page
+    if (originalUrl.includes('/submit')) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
     const already = await page.evaluate(() => !!document.getElementById('DIVALREADY'));
     if (already) {
       const archivedText = await page.evaluate(
@@ -121,7 +136,6 @@ async function* atArchive({ argv, browser }) {
           if (useArchived) archiveTodayUrl = originalUrl;
           else throw e;
         }
-        console.log(page.url());
       }
     }
 

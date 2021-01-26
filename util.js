@@ -18,3 +18,5 @@ module.exports.getViewport = function (width) {
   }
   return [w, 1080];
 };
+
+module.exports.wait = (time) => new Promise((resolve) => setTimeout(resolve, time));

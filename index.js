@@ -139,13 +139,33 @@ async function main() {
 
   let progress = ora().start(`Starting browser`);
   const browser = await launchBrowser(argv);
+  process.on('SIGINT', async () => {
+    await browser.close();
+    process.exit();
+  });
 
   progress.prefixText = 'Archiving URL';
   try {
     let archiveUrls = { url: argv.url };
     const activeArchiveMethods = [];
     for (const { site, exec } of archiveMethods) {
-      activeArchiveMethods.push(reportProgress(exec({ argv, browser }), progress));
+      function retryableMethod(args) {
+        return reportProgress(exec(args), progress).catch(async (e) => {
+          console.error(e);
+          const retry = (
+            await prompt({
+              type: 'confirm',
+              message: `${site} failed to archive ${argv.url}. Retry?`,
+              name: 'retry',
+              initial: true,
+            })
+          ).retry;
+          if (retry) {
+            return retryableMethod(args);
+          } else throw e;
+        });
+      }
+      activeArchiveMethods.push(retryableMethod({ argv, browser }));
     }
 
     const archiveResults = await Promise.all(activeArchiveMethods);
@@ -176,10 +196,6 @@ async function main() {
     if (argv.debug !== 'screenshot') {
       await open(`file://${filename}`);
     }
-    if (argv.debug)
-      console.log(
-        `NOTE: This screenshot was not taken headless, so a scrollbar is visible`
-      );
   } catch (e) {
     console.error(e);
     progress.fail(e.message);

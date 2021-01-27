@@ -3,7 +3,12 @@ const sanitizeFilename = require('sanitize-filename');
 const QRCode = require('qrcode');
 const { default: fullPageScreenshot } = require('puppeteer-full-page-screenshot');
 
-const { getViewport } = require('./util');
+const { getViewport, wait } = require('./util');
+const { promisify } = require('util');
+const { exec } = require('child_process');
+const execAsync = promisify(exec);
+const mozjpeg = require('mozjpeg');
+const { rename } = require('fs/promises');
 
 module.exports = async function* screenshot({ argv, browser, archiveUrls, stylesheet }) {
   const [width, height] = getViewport(argv.width);
@@ -36,7 +41,7 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
 
   yield 'Ensuring all images are loaded';
   if (argv.noscript) {
-    await new Promise((resolve) => setTimeout(resolve, 7000));
+    await new Promise((resolve) => setTimeout(resolve, 10000));
   } else {
     await page.evaluate(async () => {
       // Scroll down to bottom of page to activate lazy loading images
@@ -69,8 +74,9 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
     // For websites with sticky headers
     const elems = Array.from(document.body.querySelectorAll('nav, header, div'));
     for (const elem of elems) {
-      if (window.getComputedStyle(elem, null).getPropertyValue('position') === 'fixed') {
-        // Some pages will set !important rules which we must override with setProperty
+      const position = window.getComputedStyle(elem, null).getPropertyValue('position');
+      // Some pages will set !important rules which we must override with setProperty
+      if (position === 'fixed') {
         elem.style.setProperty('position', 'absolute', 'important');
         elem.style.setProperty('inset', 'initial', 'important');
       }
@@ -81,6 +87,8 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
     document.body.style.setProperty('marginTop', '0', 'important');
     // Ensure scrollbar is disabled
     document.body.innerHTML += `<style>html::-webkit-scrollbar {width: 0;height: 0;}</style>`;
+    // Some sites have a position:absolute element as direct child of body which breaks the header
+    document.body.innerHTML += `<style>body>*{inset:initial!important;}</style>`;
     // Without this the header will be empty in screenshots due to lazy rendering
     window.scrollTo(0, 0);
   });
@@ -146,9 +154,14 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
     qrcode
   );
 
+  // Wait for header reflow
+  await wait(1000);
+
   yield 'Taking full-page screenshot';
   const pageTitle = await page.title();
-  const filename = path.join(argv.outputDir, titleToFilename(pageTitle) + '.jpg');
+  const screenshotFile = titleToFilename(pageTitle) + '.jpg';
+  const filename = path.join(argv.outputDir, screenshotFile);
+  const filenameTemp = path.join(argv.outputDir, screenshotFile + '.tmp');
 
   if (argv.debug !== 'screenshot') {
     const quality = argv.screenshotQuality;
@@ -178,6 +191,15 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
     } else if (argv.screenshot === 'stitched') {
       await fullPageScreenshot(page, { path: filename }, quality);
     }
+
+    yield 'Optimizing screenshot...';
+    // Give some time to flush the screenshot to disk
+    await wait(500);
+    await execAsync(
+      `"${mozjpeg}" -quality ${argv.screenshotQuality} -outfile "${filenameTemp}" "${filename}"`,
+      { windowsHide: true }
+    );
+    await rename(filenameTemp, filename);
   }
 
   if (argv.debug) {

@@ -15,7 +15,7 @@ const { argv } = require('yargs').options({
     type: 'string',
     choice: ['fullpage', 'stitched', 'none'],
     describe:
-      "Screenshot method to use.\nfullpage (default): Take a screenshot of the page in one go. Does not work with very tall pages. Unresponsive pages with a horizontal scrollbar will override the viewport's width for the screenshot.\nstitched: Stitch together screenshots of the page by scrolling down the height of the viewport. Certain sticky elements may cause issues, especially when scripting is enabled, which must be fixed manually with a stylesheet. An image optimizer such as JPEGOptim (with -m90 --strip-none to maintain EXIF data) should be run manually afterwards.\nnone: Do not take a screenshot.",
+      "Screenshot method to use.\nfullpage (default): Take a screenshot of the page in one go. Does not work with very tall pages. Unresponsive pages with a horizontal scrollbar will override the viewport's width for the screenshot.\nstitched: Stitch together screenshots of the page by scrolling down the height of the viewport. Certain sticky elements may cause issues, especially when scripting is enabled, which must be fixed manually with a stylesheet.\nnone: Do not take a screenshot.",
     default: 'fullpage',
   },
   screenshotQuality: {

@@ -12,6 +12,7 @@ const { rename } = require('fs/promises');
 
 module.exports = async function* screenshot({ argv, browser, archiveUrls, stylesheet }) {
   const [width, height] = getViewport(argv.width);
+  const referer = getReferrer(argv.referrer);
   let page = await browser.newPage();
   await page._client.send('Emulation.clearDeviceMetricsOverride');
   await page.setViewport({ width, height });
@@ -22,7 +23,7 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
   }
 
   yield `Going to ${argv.url} (Viewport: ${width}x${height})`;
-  await page.goto(argv.url, { waitUntil: 'networkidle0', timeout: 60000 });
+  await page.goto(argv.url, { waitUntil: 'networkidle0', timeout: 60000, referer });
   if (argv.print) {
     console.info('Using print media for screenshot');
     await page.emulateMediaType('print');
@@ -41,7 +42,7 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
 
   yield 'Ensuring all images are loaded';
   if (argv.noscript) {
-    await new Promise((resolve) => setTimeout(resolve, 10000));
+    await wait(argv.imageLoadTimeout);
   } else {
     await page.evaluate(async () => {
       // Scroll down to bottom of page to activate lazy loading images
@@ -62,7 +63,7 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
             });
           })
         ),
-        new Promise((resolve) => setTimeout(resolve, 15000)),
+        wait(argv.imageLoadTimeout),
       ]);
     });
   }
@@ -248,21 +249,41 @@ function getGridGap(width) {
   return '8px';
 }
 
-const TITLE_REPLACEMENTS = {
-  '"': '”',
-  '-': '‐',
-  '|': '∣',
-  '*': '＊',
-  '/': '／',
-  '>': '＜',
-  '<': '＞',
-  ':': '∶',
-  '\\': '∖',
-  '?': '？',
-};
 function titleToFilename(title) {
+  const TITLE_REPLACEMENTS = {
+    '"': '”',
+    '-': '‐',
+    '|': '∣',
+    '*': '＊',
+    '/': '／',
+    '>': '＜',
+    '<': '＞',
+    ':': '∶',
+    '\\': '∖',
+    '?': '？',
+  };
+
   for (const char in TITLE_REPLACEMENTS) {
     title = title.replace(new RegExp(`\\${char}`, 'g'), TITLE_REPLACEMENTS[char]);
   }
   return sanitizeFilename(title);
+}
+
+function getReferrer(referrer) {
+  if (!referrer) return;
+
+  const REFERRER_PRESETS = {
+    g: 'https://google.com',
+    ddg: 'https://duckduckgo.com',
+  };
+  if (REFERRER_PRESETS.hasOwnProperty(referrer)) {
+    return REFERRER_PRESETS[referrer];
+  }
+
+  try {
+    new URL(referrer);
+    return referrer;
+  } catch (e) {
+    console.error(`--referrer (${referrer}) is not a valid URL, ignoring.`);
+  }
 }

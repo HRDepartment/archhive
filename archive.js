@@ -1,5 +1,6 @@
 const fetch = require('node-fetch');
 const { wait } = require('./util');
+const retry = require('async-retry');
 
 async function* aoArchive({ argv, browser }) {
   let archiveOrgUrl;
@@ -32,15 +33,26 @@ async function* aoArchive({ argv, browser }) {
       page.click('form[action="/save"] input[type="submit"]'),
       page.waitForNavigation({ waitUntil: 'load' }),
     ]);
+
     yield 'Waiting for archive.org to crawl...';
-    await page.waitForSelector('#spn-result a', { timeout: 120000 });
-    archiveOrgUrl = await page.evaluate(
-      () => document.querySelector('#spn-result a').href
+    archiveOrgUrl = await retry(
+      async () => {
+        await page.waitForSelector('#spn-result a', { timeout: 20000 });
+        const aoUrl = await page.evaluate(
+          () => document.querySelector('#spn-result a').href
+        );
+        if (aoUrl === 'https://web.archive.org/save') {
+          throw new Error();
+        }
+        return aoUrl;
+      },
+      {
+        retries: 10,
+        minTimeout: 100,
+        maxTimeout: 2000,
+        onRetry: () => page.reload({ waitUntil: 'load' }),
+      }
     );
-    if (archiveOrgUrl === 'https://web.archive.org/save') {
-      await new Promise((resolve) => setTimeout(resolve, 10000));
-      throw new Error();
-    }
     await page.close();
   } else if (argv.aoUrl !== 'none') {
     archiveOrgUrl = argv.aoUrl;
@@ -90,12 +102,10 @@ async function* atArchive({ argv, browser }) {
     }
 
     const originalUrl = page.url();
-    // Due to a race condition the archiver will crash (because of archive.today's navigation) while we are still on the /submit page
-    // A timeout fixes this and gives time to navigate to the /wip/ page
-    if (originalUrl.includes('/submit')) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-    const already = await page.evaluate(() => !!document.getElementById('DIVALREADY'));
+    const already = await retry(
+      () => page.evaluate(() => !!document.getElementById('DIVALREADY')),
+      { minTimeout: 100, maxTimeout: 500 }
+    );
     if (already) {
       const archivedText = await page.evaluate(
         () => document.querySelector('span[itemprop="description"]').textContent
@@ -142,7 +152,10 @@ async function* atArchive({ argv, browser }) {
     if (!archiveTodayUrl) {
       archiveTodayUrl = page.url();
       if (archiveTodayUrl.includes('/submit')) {
-        const pageTitle = await page.title();
+        const pageTitle = await retry(() => page.title(), {
+          minTimeout: 100,
+          maxTimeout: 500,
+        });
         // CAPTCHA
         if (pageTitle === 'Attention Required!') {
           if (originalUrl.includes('/submit')) {
@@ -164,11 +177,17 @@ async function* atArchive({ argv, browser }) {
         }
 
         // Redirect page or captcha
-        const pageHTML = (await page.evaluate(() => document.body.innerHTML)) || '';
+        const pageHTML =
+          (await retry(() => page.evaluate(() => document.body.innerHTML), {
+            minTimeout: 100,
+            maxTimeout: 500,
+          })) || '';
+
         const wipUrlMatch = pageHTML.match(/document\.location\.replace\("(.*?)"\)/);
         if (wipUrlMatch?.[1]) {
           archiveTodayUrl = wipUrlMatch[1];
         } else {
+          console.log(pageHTML);
           if (argv.debug) await new Promise((resolve) => setTimeout(resolve, 10000));
           throw new Error();
         }

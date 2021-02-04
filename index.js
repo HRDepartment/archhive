@@ -70,12 +70,23 @@ const { argv } = require('yargs').options({
       '"no" to always use the latest existing snapshot when possible. "manual" to manually determine whether to rearchive the link. "auto" (default) automatically determines whether the link is outdated. "never" to never renew',
     default: 'auto',
   },
+  referrer: {
+    type: 'string',
+    describe:
+      'Referrer site to use when visiting the site when taking a screenshot. Useful for paywalls. Presets: g: https://google.com, ddg: https://duckduckgo.com',
+  },
   outputDir: { type: 'string', default: process.cwd() },
   noscript: {
     type: 'boolean',
     describe:
       'If passed, JavaScript will be disabled when taking a screenshot. Useful especially for paywall websites and obnoxious popups.',
     default: false,
+  },
+  imageLoadTimeout: {
+    type: 'number',
+    describe:
+      'Timeout in milliseconds for images to load. In noscript mode, this amount of time is always elapsed to let images load.',
+    default: 15000,
   },
   debug: {
     type: 'string',
@@ -84,9 +95,6 @@ const { argv } = require('yargs').options({
       'screenshot: Debug the screenshotting process without saving files or archiving a URL.',
   },
 });
-
-argv.url = argv.url || argv._.join(' ');
-
 const ora = require('ora');
 const screenshot = require('./screenshot');
 const archiveMethods = require('./archive');
@@ -94,21 +102,28 @@ const resolveStylesheet = require('./stylesheet');
 const addExifMetadata = require('./exif');
 const launchBrowser = require('./browser');
 const open = require('open');
+const fs = require('fs');
 const { prompt } = require('enquirer');
 const { VIEWPORT_WIDTH } = require('./util');
 
 async function main() {
+  const originalArgv = { ...argv };
   if (!argv.url) {
-    argv.url = (await prompt({ type: 'input', message: 'URL:', name: 'url' })).url;
-    if (!argv.width) {
-      argv.width = (
-        await prompt({
-          type: 'select',
-          message: 'Viewport:',
-          name: 'width',
-          choices: Object.keys(VIEWPORT_WIDTH),
-        })
-      ).width;
+    const extraArgs = argv._.join(' ');
+    if (extraArgs) {
+      argv.url = extraArgs;
+    } else {
+      argv.url = (await prompt({ type: 'input', message: 'URL:', name: 'url' })).url;
+      if (!argv.width) {
+        argv.width = (
+          await prompt({
+            type: 'select',
+            message: 'Viewport:',
+            name: 'width',
+            choices: Object.keys(VIEWPORT_WIDTH),
+          })
+        ).width;
+      }
     }
   }
 
@@ -195,6 +210,14 @@ async function main() {
     console.log(`archive.today: ${archiveUrls.archiveTodayUrl}`);
     if (argv.debug !== 'screenshot') {
       await open(`file://${filename}`);
+      const launchArgv = process.argv.slice(2);
+      // Add --width and --url if they are specified via the CLI
+      if (!originalArgv.width) launchArgv.push('--width', argv.width);
+      if (!originalArgv.url) launchArgv.push(`"${argv.url}"`);
+      fs.appendFileSync(
+        path.join(argv.outputDir, '.archhive_history'),
+        `${launchArgv.join(' ')} # ${new Date()}\n`
+      );
     }
   } catch (e) {
     console.error(e);
@@ -204,7 +227,11 @@ async function main() {
   await browser.close();
 }
 
-main();
+try {
+  main();
+} catch (e) {
+  process.exit(1);
+}
 
 async function reportProgress(iterator, progress) {
   // This emulates for await of, but allows us to pass back the results of {prompt: ...} to yield

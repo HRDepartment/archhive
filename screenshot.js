@@ -44,7 +44,7 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
   if (argv.noscript) {
     await wait(argv.imageLoadTimeout);
   } else {
-    await page.evaluate(async () => {
+    await page.evaluate(async (imageLoadTimeout) => {
       // Scroll down to bottom of page to activate lazy loading images
       document.body.scrollIntoView(false);
 
@@ -63,36 +63,10 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
             });
           })
         ),
-        wait(argv.imageLoadTimeout),
+        new Promise((resolve) => setTimeout(resolve, imageLoadTimeout)), // wait not available here
       ]);
-    });
+    }, argv.imageLoadTimeout);
   }
-
-  yield 'Fixing page layout';
-  // Various compatibility fixes
-  await page.evaluate(async () => {
-    // position:fixed -> position:absolute
-    // For websites with sticky headers
-    const elems = Array.from(document.body.querySelectorAll('nav, header, div'));
-    for (const elem of elems) {
-      const position = window.getComputedStyle(elem, null).getPropertyValue('position');
-      // Some pages will set !important rules which we must override with setProperty
-      if (position === 'fixed') {
-        elem.style.setProperty('position', 'absolute', 'important');
-        elem.style.setProperty('inset', 'initial', 'important');
-      }
-    }
-
-    // Disable weird rules present on some pages
-    document.body.style.setProperty('paddingTop', '0', 'important');
-    document.body.style.setProperty('marginTop', '0', 'important');
-    // Ensure scrollbar is disabled
-    document.body.innerHTML += `<style>html::-webkit-scrollbar {width: 0;height: 0;}</style>`;
-    // Some sites have a position:absolute element as direct child of body which breaks the header
-    document.body.innerHTML += `<style>body>*{inset:initial!important;}</style>`;
-    // Without this the header will be empty in screenshots due to lazy rendering
-    window.scrollTo(0, 0);
-  });
 
   yield 'Adding header';
   const grid = { template: getGridTemplate(width), gap: getGridGap(width) };
@@ -155,8 +129,42 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
     qrcode
   );
 
+  yield 'Fixing page layout';
+  // Various compatibility fixes
+  await page.evaluate(async () => {
+    // position:fixed -> position:absolute
+    // For websites with sticky headers
+    const elems = Array.from(document.body.querySelectorAll('nav, header, div'));
+    for (const elem of elems) {
+      const position = window.getComputedStyle(elem, null).getPropertyValue('position');
+      // Some pages will set !important rules which we must override with setProperty
+      if (position === 'fixed') {
+        elem.style.setProperty('position', 'absolute', 'important');
+        elem.style.setProperty('inset', 'initial', 'important');
+      }
+      // fixes: Wikipedia's header
+      else if (position === 'absolute') {
+        const top = window.getComputedStyle(elem, null).getPropertyValue('top');
+        if (top === '0px') {
+          const headerHeight = document.querySelector('archhive-header').offsetHeight;
+          elem.style.setProperty('top', `${headerHeight}px`, 'important');
+        }
+      }
+    }
+
+    // Disable weird rules present on some pages
+    document.body.style.setProperty('paddingTop', '0', 'important');
+    document.body.style.setProperty('marginTop', '0', 'important');
+    // Ensure scrollbar is disabled
+    document.body.innerHTML += `<style>html::-webkit-scrollbar {width: 0;height: 0;}</style>`;
+    // Some sites have a position:absolute element as direct child of body which breaks the header
+    document.body.innerHTML += `<style>body>*{inset:initial!important;}</style>`;
+    // Without this the header will be empty in screenshots due to lazy rendering
+    window.scrollTo(0, 0);
+  });
+
   // Wait for header reflow
-  await wait(1000);
+  await wait(900);
 
   yield 'Taking full-page screenshot';
   const pageTitle = await page.title();

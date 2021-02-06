@@ -47,9 +47,9 @@ async function* aoArchive({ argv, browser }) {
         return aoUrl;
       },
       {
-        retries: 10,
-        minTimeout: 100,
-        maxTimeout: 2000,
+        retries: 15,
+        minTimeout: 1000,
+        maxTimeout: 1000,
         onRetry: () => page.reload({ waitUntil: 'load' }),
       }
     );
@@ -187,9 +187,12 @@ async function* atArchive({ argv, browser }) {
         if (wipUrlMatch?.[1]) {
           archiveTodayUrl = wipUrlMatch[1];
         } else {
-          console.log(pageHTML);
-          if (argv.debug) await new Promise((resolve) => setTimeout(resolve, 10000));
-          throw new Error();
+          // WIP page most likely
+          archiveTodayUrl = page.url();
+          if (archiveTodayUrl.includes('/submit')) {
+            if (argv.debug) await new Promise((resolve) => setTimeout(resolve, 10000));
+            throw new Error();
+          }
         }
       }
     }

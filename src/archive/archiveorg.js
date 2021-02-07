@@ -1,4 +1,3 @@
-import retry from 'async-retry';
 import { blockResources } from '../browser.js';
 import { createShortURL } from '../shorturl.js';
 import { wait } from '../util.js';
@@ -41,27 +40,12 @@ export async function aoArchive(ctx, task) {
       page.waitForNavigation({ waitUntil: 'load' }),
     ]);
 
-    task.output = 'Waiting for archive.org to crawl...';
-    archiveOrgUrl = await retry(
-      async () => {
-        await page.waitForSelector('#spn-result a', { timeout: 20000 });
-        const aoUrl = await page.evaluate(() => {
-          /** @type {HTMLAnchorElement} */
-          const result = document.querySelector('#spn-result a');
-          return result.href;
-        });
-        if (aoUrl === 'https://web.archive.org/save') {
-          throw new Error();
-        }
-        return aoUrl;
-      },
-      {
-        retries: 15,
-        minTimeout: 1000,
-        maxTimeout: 1000,
-        onRetry: () => page.reload({ waitUntil: 'load' }),
-      }
-    );
+    const date = new Date();
+    const dateid = `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(
+      2,
+      '0'
+    )}${String(date.getUTCDate()).padStart(2, '0')}`;
+    archiveOrgUrl = `https://web.archive.org/web/${dateid}/${ctx.opts.url}`;
     await page.close();
   } else if (ctx.opts.aoUrl !== 'none') {
     archiveOrgUrl = ctx.opts.aoUrl;

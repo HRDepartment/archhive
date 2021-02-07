@@ -1,6 +1,6 @@
-const fetch = require('node-fetch');
-const { wait } = require('./util');
-const retry = require('async-retry');
+import retry from 'async-retry';
+import fetch from 'node-fetch';
+import { wait } from './util.js';
 
 async function* aoArchive({ argv, browser }) {
   let archiveOrgUrl;
@@ -207,7 +207,7 @@ async function* atArchive({ argv, browser }) {
   return { archiveTodayUrl };
 }
 
-module.exports = [
+export default [
   { site: 'archive.org', exec: aoArchive },
   { site: 'archive.today', exec: atArchive },
 ];

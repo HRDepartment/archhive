@@ -1,16 +1,16 @@
-const path = require('path');
-const sanitizeFilename = require('sanitize-filename');
-const QRCode = require('qrcode');
-const { default: fullPageScreenshot } = require('puppeteer-full-page-screenshot');
+import { exec } from 'child_process';
+import { rename } from 'fs/promises';
+import mozjpeg from 'mozjpeg';
+import { join } from 'path';
+import { default as fullPageScreenshot } from 'puppeteer-full-page-screenshot';
+import QRCode from 'qrcode';
+import sanitizeFilename from 'sanitize-filename';
+import { promisify } from 'util';
+import { getViewport, wait } from './util.js';
 
-const { getViewport, wait } = require('./util');
-const { promisify } = require('util');
-const { exec } = require('child_process');
 const execAsync = promisify(exec);
-const mozjpeg = require('mozjpeg');
-const { rename } = require('fs/promises');
 
-module.exports = async function* screenshot({ argv, browser, archiveUrls, stylesheet }) {
+export default async function* screenshot({ argv, browser, archiveUrls, stylesheet }) {
   const [width, height] = getViewport(argv.width);
   const referer = getReferrer(argv.referrer);
   let page = await browser.newPage();
@@ -18,6 +18,7 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
   await page.setViewport({ width, height });
   // Need to bypass csp for the inline QR code image and custom stylesheet
   await page.setBypassCSP(true);
+  await page.emulateTimezone('UTC'); // try GMT?
   if (argv.noscript) {
     await page.setJavaScriptEnabled(false);
   }
@@ -42,6 +43,17 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
 
   yield 'Ensuring all images are loaded';
   if (argv.noscript) {
+    await page.evaluate(() => {
+      const images = Array.from(document.getElementsByTagName('img'));
+      for (const img of images) {
+        // data-src etc.
+        const lazySrc = img.dataset.lazySrc || img.dataset.src;
+        const lazySrcset = img.dataset.lazySrcset || img.dataset.srcset;
+        // data attributes used by websites that lazyload images
+        if (lazySrc) img.src = lazySrc;
+        if (lazySrcset) img.srcset = lazySrcset;
+      }
+    });
     await wait(argv.imageLoadTimeout);
   } else {
     await page.evaluate(async (imageLoadTimeout) => {
@@ -136,16 +148,22 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
     // For websites with sticky headers
     const elems = Array.from(document.body.querySelectorAll('nav, header, div'));
     for (const elem of elems) {
-      const position = window.getComputedStyle(elem, null).getPropertyValue('position');
+      const computedStyle = window.getComputedStyle(elem, null);
+      const position = computedStyle.position;
       // Some pages will set !important rules which we must override with setProperty
       if (position === 'fixed') {
         elem.style.setProperty('position', 'absolute', 'important');
         elem.style.setProperty('inset', 'initial', 'important');
       }
-      // fixes: Wikipedia's header
+      // fixes: MediaWiki's header
       else if (position === 'absolute') {
-        const top = window.getComputedStyle(elem, null).getPropertyValue('top');
-        if (top === '0px') {
+        if (
+          computedStyle.top === '0px' &&
+          // Add additional conditions to reduce the false positive rate of this heuristic on sites
+          elem.tagName === 'DIV' &&
+          computedStyle.display === 'block' &&
+          computedStyle.zIndex === 'auto'
+        ) {
           const headerHeight = document.querySelector('archhive-header').offsetHeight;
           elem.style.setProperty('top', `${headerHeight}px`, 'important');
         }
@@ -155,6 +173,8 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
     // Disable weird rules present on some pages
     document.body.style.setProperty('paddingTop', '0', 'important');
     document.body.style.setProperty('marginTop', '0', 'important');
+    // Ensure horizontal scrollbar is disabled
+    document.body.style.setProperty('overflowX', 'hidden', 'important');
     // Ensure scrollbar is disabled
     document.body.innerHTML += `<style>html::-webkit-scrollbar {width: 0;height: 0;}</style>`;
     // Some sites have a position:absolute element as direct child of body which breaks the header
@@ -169,8 +189,8 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
   yield 'Taking full-page screenshot';
   const pageTitle = await page.title();
   const screenshotFile = titleToFilename(pageTitle) + '.jpg';
-  const filename = path.join(argv.outputDir, screenshotFile);
-  const filenameTemp = path.join(argv.outputDir, screenshotFile + '.tmp');
+  const filename = join(argv.outputDir, screenshotFile);
+  const filenameTemp = join(argv.outputDir, screenshotFile + '.tmp');
 
   if (argv.debug !== 'screenshot') {
     const quality = argv.screenshotQuality;
@@ -220,7 +240,7 @@ module.exports = async function* screenshot({ argv, browser, archiveUrls, styles
   }
 
   return { pageTitle, filename };
-};
+}
 
 function browserDisconnected(browser) {
   return new Promise((resolve) => {

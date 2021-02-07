@@ -1,6 +1,6 @@
-const ChildProcess = require('child_process');
+import { spawnSync } from 'child_process';
 
-module.exports = async function* addExifMetadata({
+export default async function* addExifMetadata({
   argv,
   pageTitle,
   filename,
@@ -9,7 +9,7 @@ module.exports = async function* addExifMetadata({
   yield 'Adding exif metadata';
   const date = new Date();
   try {
-    ChildProcess.spawnSync('exiftool', [
+    spawnSync('exiftool', [
       // Enable newlines and interpret " literally
       '-ec',
       // Remove exif tags from Chrome's screenshotting process
@@ -36,4 +36,4 @@ module.exports = async function* addExifMetadata({
   } catch (e) {
     console.log('exiftool not installed, skipping', e);
   }
-};
+}

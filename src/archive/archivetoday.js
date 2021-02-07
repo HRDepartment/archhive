@@ -8,11 +8,15 @@ import { blockResources } from '../browser.js';
 export async function atArchive(ctx, task) {
   let archiveTodayUrl;
   if (ctx.opts.atUrl === 'auto') {
+    task.output = 'Submitting URL to archive.today';
     const page = await ctx.browser.newPage();
     // Disable image loading so the browser doesn't crash when loading a snapshot
     await blockResources(page, ['image']);
     await page.setJavaScriptEnabled(false);
     await page.goto('https://archive.today', { waitUntil: 'domcontentloaded' });
+    const atDomain = new URL(page.url()).hostname;
+    task.title = atDomain;
+    task.output = `Submitting URL to ${atDomain}`;
     await page.evaluate((url) => {
       /** @type {HTMLInputElement} */ (document.querySelector('#url')).value = url;
     }, ctx.opts.url);
@@ -63,7 +67,7 @@ export async function atArchive(ctx, task) {
       }
 
       if (rearchive) {
-        if (ctx.opts.debug) ctx.log?.('Rearchiving on archive.today');
+        task.output = `Rearchiving on ${atDomain}`;
         try {
           await Promise.all([
             page.click('input[type="submit"][value="save"]'),

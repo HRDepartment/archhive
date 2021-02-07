@@ -17,6 +17,7 @@ export interface ArchhiveOptions {
     noscript: boolean;
     imageLoadTimeout: number;
     debug?: 'all' | 'screenshot';
+    open?: boolean;
     url: string;
 }
 

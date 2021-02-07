@@ -6,7 +6,10 @@ import open from 'open';
 import { appendFileSync } from 'fs';
 import enquirer from 'enquirer';
 import screenshot from './src/screenshot.js';
-import archivers from './src/archive/archivers.js';
+import archivers, {
+  isArchiveOrgUrl,
+  isArchiveTodayUrl,
+} from './src/archive/archivers.js';
 import resolveStylesheet from './src/stylesheet.js';
 import addExifMetadata from './src/exif.js';
 import launchBrowser from './src/browser.js';
@@ -108,6 +111,12 @@ const { argv: yargsArgv } = yargs(process.argv.slice(2)).options({
     describe:
       'screenshot: Debug the screenshotting process without saving files or archiving a URL.',
   },
+  open: {
+    type: 'boolean',
+    describe:
+      'If the created screenshot should be opened using your preferred image viewer.',
+    default: true,
+  },
   url: { type: 'string', describe: 'URL to archive' },
 });
 
@@ -152,7 +161,19 @@ async function main() {
   }
 
   try {
-    new URL(opts.url);
+    const urlObject = new URL(opts.url);
+    // Ensure entities are encoded
+    opts.url = urlObject.toString();
+    const isAoUrl = isArchiveOrgUrl(urlObject);
+    const isAtUrl = isArchiveTodayUrl(urlObject);
+    // Automatically set the appropriate field if detected so we don't submit an already submitted URL
+    if (isAoUrl) {
+      opts.aoUrl = opts.url;
+    } else if (isAtUrl) {
+      opts.atUrl = opts.url;
+      // archive.today pages don't have any JS so it's faster to have scripting enabled so we can do proper image loading detection
+      opts.noscript = false;
+    }
   } catch (e) {
     throw new Error(`Invalid URL specified: ${opts.url}`);
   }
@@ -241,7 +262,10 @@ async function main() {
   );
   log(`archive.today: ${ctx.urls.archiveTodayUrl}`);
   if (opts.debug !== 'screenshot') {
-    await open(`file://${ctx.filename}`);
+    if (opts.open) {
+      await open(`file://${ctx.filename}`);
+    }
+
     const launchArgv = process.argv.slice(2);
     // Add --width and --url if they are specified via the CLI
     if (!originalArgv.width) launchArgv.push('--width', opts.width);

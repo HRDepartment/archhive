@@ -24,9 +24,9 @@ export default async function addExifMetadata(ctx, task) {
         .filter(Boolean)
         .map((keyword) => `-keywords=${keyword}`),
       `-CreatorWorkURL=${ctx.urls.url}`,
-      `-DateTimeOriginal=${date.getUTCFullYear()}:${
+      `-DateTimeOriginal=${date.getUTCFullYear()}:${String(
         date.getUTCMonth() + 1
-      }:${date.getUTCDate()} 00:00:00`,
+      ).padStart(2, '0')}:${String(date.getUTCDate()).padStart(2, '0')} 00:00:00`,
       '-overwrite_original',
       ctx.filename,
       // Creator?

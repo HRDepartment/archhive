@@ -12,7 +12,11 @@ import { getViewport, wait } from './util.js';
 // Required filters
 const ARCHHIVE_FILTERS = `
 ! Block all video and audio when taking screenshots
-||^$media`;
+||^$media
+
+! archive.org header
+web.archive.org###wm-ipp-base
+`;
 
 /**
  *

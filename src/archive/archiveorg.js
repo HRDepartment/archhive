@@ -1,3 +1,4 @@
+import retry from 'async-retry';
 import { blockResources } from '../browser.js';
 import { createShortURL } from '../shorturl.js';
 import { wait } from '../util.js';
@@ -11,9 +12,9 @@ export async function aoArchive(ctx, task) {
   let archiveOrgShortUrl;
 
   if (ctx.opts.aoUrl === 'auto') {
+    task.output = 'Submitting URL to archive.org';
     const page = await ctx.browser.newPage();
     await blockResources(page, ['image']);
-    task.output = 'Submitting URL to archive.org';
     let savePageLoaded = false;
     while (!savePageLoaded) {
       const saveResponse = await page.goto(`https://web.archive.org/save`, {
@@ -37,15 +38,31 @@ export async function aoArchive(ctx, task) {
     }, ctx.opts.url);
     await Promise.all([
       page.click('form[action="/save"] input[type="submit"]'),
+      // Wait a bit after navigating so the script has a chance to make the save request
       page.waitForNavigation({ waitUntil: 'load' }),
     ]);
 
-    const date = new Date();
-    const dateid = `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(
-      2,
-      '0'
-    )}${String(date.getUTCDate()).padStart(2, '0')}`;
-    archiveOrgUrl = `https://web.archive.org/web/${dateid}/${ctx.opts.url}`;
+    task.output = 'Waiting for archive.org to crawl...';
+    archiveOrgUrl = await retry(
+      async () => {
+        await page.waitForSelector('#spn-result a', { timeout: 50000 });
+        const aoUrl = await page.evaluate(() => {
+          /** @type {HTMLAnchorElement} */
+          const result = document.querySelector('#spn-result a');
+          return result.href;
+        });
+        if (aoUrl === 'https://web.archive.org/save') {
+          throw new Error();
+        }
+        return aoUrl;
+      },
+      {
+        retries: 6,
+        minTimeout: 1500,
+        maxTimeout: 1500,
+        onRetry: () => page.reload({ waitUntil: 'load' }),
+      }
+    );
     await page.close();
   } else if (ctx.opts.aoUrl !== 'none') {
     archiveOrgUrl = ctx.opts.aoUrl;

@@ -3,14 +3,18 @@ import { join, dirname } from 'path';
 
 const AT_IMPORT_RULES = /@import (?:url\()?(?:"|')(.*?)(?:"|')\)?(?: (.*?))?;/g;
 
-export default async function resolveStylesheet(argv) {
+/**
+ *
+ * @param {import('./types').ArchhiveOptions} opts
+ */
+export default async function resolveStylesheet(opts) {
   let stylesheet = '';
   let cssFilename;
-  if (argv.stylesheet) {
-    cssFilename = argv.stylesheet;
+  if (opts.stylesheet) {
+    cssFilename = opts.stylesheet;
   } else {
-    const host = new URL(argv.url).host;
-    cssFilename = join(argv.stylesheetsDir, host + '.css');
+    const host = new URL(opts.url).host;
+    cssFilename = join(opts.stylesheetsDir, host + '.css');
   }
 
   try {

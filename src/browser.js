@@ -7,14 +7,19 @@ import puppeteerExtra from 'puppeteer-extra';
 import AdblockerPlugin from 'puppeteer-extra-plugin-adblocker';
 import AnonymizeUAPlugin from 'puppeteer-extra-plugin-anonymize-ua';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import { getViewport } from './util.js';
+import { getViewport, wait } from './util.js';
 
 // Required filters
 const ARCHHIVE_FILTERS = `
 ! Block all video and audio when taking screenshots
 ||^$media`;
 
-export default async function launchBrowser(argv) {
+/**
+ *
+ * @param {import('./types').TaskContext} ctx
+ * @param {import('./types').Task} task
+ */
+export default async function launchBrowser(ctx, task) {
   puppeteerExtra.use(AnonymizeUAPlugin());
 
   // Add stealth plugin and use defaults (all tricks to hide puppeteer usage)
@@ -27,39 +32,37 @@ export default async function launchBrowser(argv) {
   const blocker = await adblocker.getBlocker();
   addFiltersToAdblocker(blocker, ARCHHIVE_FILTERS);
 
-  const filtersFile = argv.filters
-    ? resolve(argv.filters)
-    : join(argv.stylesheetsDir, 'filters.txt');
+  const filtersFile = ctx.opts.filters
+    ? resolve(ctx.opts.filters)
+    : join(ctx.opts.stylesheetsDir, 'filters.txt');
 
   let customFilters;
   try {
     customFilters = readFileSync(filtersFile, 'utf8');
   } catch (e) {
-    if (argv.filters) {
-      console.error(`Could not read filters file: ${filtersFile} (${e.message})`);
-      process.exit(1);
+    if (ctx.opts.filters) {
+      throw new Error(`Could not read filters file: ${filtersFile} (${e.message})`);
     }
   }
 
   if (customFilters) {
     const filtersUpdated = addFiltersToAdblocker(blocker, customFilters);
-    if (argv.debug && filtersUpdated) {
-      console.log(`Using custom filters file: ${filtersFile}`);
+    if (ctx.opts.debug && filtersUpdated) {
+      ctx.log?.(`Using custom filters file: ${filtersFile}`);
     }
   }
   puppeteerExtra.use(adblocker);
 
-  const [width, height] = getViewport(argv.width);
+  const [width, height] = getViewport(ctx.opts.width);
   if (!width) {
-    console.error(`Invalid width specified: ${argv.width}`);
-    process.exit(1);
+    throw new TypeError(`Invalid width specified: ${ctx.opts.width}`);
   }
 
   const browser = await puppeteerExtra.launch({
-    headless: !argv.debug,
+    headless: !ctx.opts.debug,
     args: [`--window-size=${width},${height}`],
   });
-  return browser;
+  return (ctx.browser = browser);
 }
 
 function addFiltersToAdblocker(blocker, filters) {
@@ -72,4 +75,16 @@ function addFiltersToAdblocker(blocker, filters) {
     newNetworkFilters: networkFilters,
   });
   return filtersUpdated;
+}
+
+export async function blockResources(page, blocked) {
+  // Give the listener some time to register
+  await wait(100);
+  // Remove adblocker request handler
+  // https://github.com/cliqz-oss/adblocker/blob/master/packages/adblocker-puppeteer/adblocker.ts
+  page.removeAllListeners('request');
+  page.on('request', async (request) => {
+    if (blocked.includes(request.resourceType())) request.abort();
+    else request.continue();
+  });
 }

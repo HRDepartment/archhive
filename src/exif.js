@@ -1,12 +1,11 @@
 import { spawnSync } from 'child_process';
-
-export default async function* addExifMetadata({
-  argv,
-  pageTitle,
-  filename,
-  archiveUrls,
-}) {
-  yield 'Adding exif metadata';
+/**
+ *
+ * @param {import('./types').TaskContext} ctx
+ * @param {import('./types').Task} task
+ */
+export default async function addExifMetadata(ctx, task) {
+  task.output = 'Adding exif metadata';
   const date = new Date();
   try {
     spawnSync('exiftool', [
@@ -17,23 +16,23 @@ export default async function* addExifMetadata({
       // Remove exiftool version number
       '-XMPToolkit=',
       // Escape backslashes
-      `-Description=${pageTitle.replace(/\\/g, '\\\\')} \\n ${Object.values(
-        archiveUrls
-      ).join(' \\n ')}${argv.exifComment ? ` \n ${argv.exifComment}` : ``}`,
-      ...(argv.exifKeywords || '')
+      `-Description=${ctx.pageTitle.replace(/\\/g, '\\\\')} \\n ${Object.values(
+        ctx.urls
+      ).join(' \\n ')}${ctx.opts.exifComment ? ` \n ${ctx.opts.exifComment}` : ``}`,
+      ...(ctx.opts.exifKeywords || '')
         .split(',')
         .filter(Boolean)
         .map((keyword) => `-keywords=${keyword}`),
-      `-CreatorWorkURL=${archiveUrls.url}`,
+      `-CreatorWorkURL=${ctx.urls.url}`,
       `-DateTimeOriginal=${date.getUTCFullYear()}:${
         date.getUTCMonth() + 1
       }:${date.getUTCDate()} 00:00:00`,
       '-overwrite_original',
-      filename,
+      ctx.filename,
       // Creator?
       // Author?
     ]);
   } catch (e) {
-    console.log('exiftool not installed, skipping', e);
+    task.skip('exiftool not installed, skipping');
   }
 }

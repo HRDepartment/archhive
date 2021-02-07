@@ -7,6 +7,10 @@ export const VIEWPORT_WIDTH = {
   desktop: 1920,
 };
 
+/**
+ *
+ * @param {string} width
+ */
 export function getViewport(width) {
   let w = 0;
   if (typeof width === 'string') width = width.toLowerCase();
@@ -19,6 +23,10 @@ export function getViewport(width) {
   return [w, 1080];
 }
 
+/**
+ *
+ * @param {number} time
+ */
 export function wait(time) {
   return new Promise((resolve) => setTimeout(resolve, time));
 }

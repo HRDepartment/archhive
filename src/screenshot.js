@@ -2,7 +2,7 @@ import { exec } from 'child_process';
 import { rename } from 'fs/promises';
 import mozjpeg from 'mozjpeg';
 import { join } from 'path';
-import { default as fullPageScreenshot } from 'puppeteer-full-page-screenshot';
+import fullPageScreenshot from 'puppeteer-full-page-screenshot';
 import QRCode from 'qrcode';
 import sanitizeFilename from 'sanitize-filename';
 import { promisify } from 'util';
@@ -10,39 +10,51 @@ import { getViewport, wait } from './util.js';
 
 const execAsync = promisify(exec);
 
-export default async function* screenshot({ argv, browser, archiveUrls, stylesheet }) {
-  const [width, height] = getViewport(argv.width);
-  const referer = getReferrer(argv.referrer);
-  let page = await browser.newPage();
+/**
+ *
+ * @param {import('./types').TaskContext} ctx
+ * @param {import('./types').Task} task
+ */
+export default async function screenshot(ctx, task) {
+  const [width, height] = getViewport(ctx.opts.width);
+  let referer;
+  try {
+    referer = getReferrer(ctx.opts.referrer);
+  } catch (e) {
+    ctx.log?.(e.message);
+  }
+
+  let page = await ctx.browser.newPage();
+
   await page._client.send('Emulation.clearDeviceMetricsOverride');
   await page.setViewport({ width, height });
   // Need to bypass csp for the inline QR code image and custom stylesheet
   await page.setBypassCSP(true);
   await page.emulateTimezone('UTC'); // try GMT?
-  if (argv.noscript) {
+  if (ctx.opts.noscript) {
     await page.setJavaScriptEnabled(false);
   }
 
-  yield `Going to ${argv.url} (Viewport: ${width}x${height})`;
-  await page.goto(argv.url, { waitUntil: 'networkidle0', timeout: 60000, referer });
-  if (argv.print) {
-    console.info('Using print media for screenshot');
+  task.output = `Going to ${ctx.opts.url} (Viewport: ${width}x${height})`;
+  await page.goto(ctx.opts.url, { waitUntil: 'networkidle0', timeout: 60000, referer });
+  if (ctx.opts.print) {
+    ctx.log?.('Using print media for screenshot');
     await page.emulateMediaType('print');
   }
 
   const actualUrl = page.url();
-  if (actualUrl !== argv.url) {
-    console.warn(`\nRedirect followed: ${actualUrl}`);
+  if (actualUrl !== ctx.opts.url) {
+    ctx.log?.(`\nRedirect followed: ${actualUrl}`);
   }
 
-  yield `Generating QR Code for ${actualUrl}`;
+  task.output = `Generating QR Code for ${actualUrl}`;
   const qrcode = await QRCode.toDataURL(actualUrl, {
     margin: 0,
     color: { light: '#f7f7f7' },
   });
 
-  yield 'Ensuring all images are loaded';
-  if (argv.noscript) {
+  task.output = 'Ensuring all images are loaded';
+  if (ctx.opts.noscript) {
     await page.evaluate(() => {
       const images = Array.from(document.getElementsByTagName('img'));
       for (const img of images) {
@@ -54,7 +66,7 @@ export default async function* screenshot({ argv, browser, archiveUrls, styleshe
         if (lazySrcset) img.srcset = lazySrcset;
       }
     });
-    await wait(argv.imageLoadTimeout);
+    await wait(ctx.opts.imageLoadTimeout);
   } else {
     await page.evaluate(async (imageLoadTimeout) => {
       // Scroll down to bottom of page to activate lazy loading images
@@ -77,17 +89,17 @@ export default async function* screenshot({ argv, browser, archiveUrls, styleshe
         ),
         new Promise((resolve) => setTimeout(resolve, imageLoadTimeout)), // wait not available here
       ]);
-    }, argv.imageLoadTimeout);
+    }, ctx.opts.imageLoadTimeout);
   }
 
-  yield 'Adding header';
+  task.output = 'Adding header';
   const grid = { template: getGridTemplate(width), gap: getGridGap(width) };
 
-  if (!archiveUrls.archiveOrgShortUrl && !archiveUrls.archiveOrgUrl) {
-    console.warn(`warn: Missing archive.org link`);
+  if (!ctx.urls.archiveOrgShortUrl && !ctx.urls.archiveOrgUrl) {
+    ctx.log?.(`warn: Missing archive.org link`);
   }
-  if (!archiveUrls.archiveTodayUrl) {
-    console.warn(`warn: Missing archive.today link`);
+  if (!ctx.urls.archiveTodayUrl) {
+    ctx.log?.(`warn: Missing archive.today link`);
   }
 
   // Add archive urls header. Should be done after image load
@@ -134,26 +146,35 @@ export default async function* screenshot({ argv, browser, archiveUrls, styleshe
         return url.replace(/^https?:\/\//, '');
       }
     },
-    archiveUrls,
+    ctx.urls,
     grid,
     currentDate(),
-    stylesheet,
+    ctx.stylesheet,
     qrcode
   );
 
-  yield 'Fixing page layout';
+  task.output = 'Fixing page layout';
   // Various compatibility fixes
   await page.evaluate(async () => {
     // position:fixed -> position:absolute
     // For websites with sticky headers
     const elems = Array.from(document.body.querySelectorAll('nav, header, div'));
+
     for (const elem of elems) {
       const computedStyle = window.getComputedStyle(elem, null);
       const position = computedStyle.position;
       // Some pages will set !important rules which we must override with setProperty
       if (position === 'fixed') {
-        elem.style.setProperty('position', 'absolute', 'important');
-        elem.style.setProperty('inset', 'initial', 'important');
+        /** @type {HTMLElement} */ (elem).style.setProperty(
+          'position',
+          'absolute',
+          'important'
+        );
+        /** @type {HTMLElement} */ (elem).style.setProperty(
+          'inset',
+          'initial',
+          'important'
+        );
       }
       // fixes: MediaWiki's header
       else if (position === 'absolute') {
@@ -164,8 +185,14 @@ export default async function* screenshot({ argv, browser, archiveUrls, styleshe
           computedStyle.display === 'block' &&
           computedStyle.zIndex === 'auto'
         ) {
-          const headerHeight = document.querySelector('archhive-header').offsetHeight;
-          elem.style.setProperty('top', `${headerHeight}px`, 'important');
+          const headerHeight = /** @type {HTMLElement} */ (document.querySelector(
+            'archhive-header'
+          )).offsetHeight;
+          /** @type {HTMLElement} */ (elem).style.setProperty(
+            'top',
+            `${headerHeight}px`,
+            'important'
+          );
         }
       }
     }
@@ -186,60 +213,60 @@ export default async function* screenshot({ argv, browser, archiveUrls, styleshe
   // Wait for header reflow
   await wait(900);
 
-  yield 'Taking full-page screenshot';
+  task.output = 'Taking full-page screenshot';
   const pageTitle = await page.title();
   const screenshotFile = titleToFilename(pageTitle) + '.jpg';
-  const filename = join(argv.outputDir, screenshotFile);
-  const filenameTemp = join(argv.outputDir, screenshotFile + '.tmp');
+  const filename = join(ctx.opts.outputDir, screenshotFile);
+  const filenameTemp = join(ctx.opts.outputDir, screenshotFile + '.tmp');
 
-  if (argv.debug !== 'screenshot') {
-    const quality = argv.screenshotQuality;
+  if (ctx.opts.debug !== 'screenshot') {
+    const quality = ctx.opts.screenshotQuality;
     const { pageWidth, pageHeight } = await page.evaluate(() => [
       document.documentElement.scrollWidth,
       document.documentElement.scrollHeight,
     ]);
-    if (argv.screenshot === 'fullpage') {
+    if (ctx.opts.screenshot === 'fullpage') {
       // Hardcoded limit in Chrome. See https://github.com/puppeteer/puppeteer/issues/359
       if (pageHeight > 16384) {
-        argv.screenshot = 'stitched';
-        console.warn(
+        ctx.opts.screenshot = 'stitched';
+        ctx.log?.(
           `warn: The page's height is ${pageHeight}px which is greater than the 'fullpage' limit of 16384px. --screenshot stitched will be used instead. Remember to manually optimize the resulting .jpg.`
         );
       } else if (pageWidth > width) {
-        console.warn(
+        ctx.log?.(
           `warn: The screenshot will be stretched to a width of ${pageWidth}px (was: ${width}px) as the page is not responsive. Use --screenshot stitched if this is undesirable.`
         );
       }
     }
-    if (argv.screenshot === 'fullpage') {
+    if (ctx.opts.screenshot === 'fullpage') {
       await page.screenshot({
         path: filename,
         fullPage: true,
         quality,
       });
-    } else if (argv.screenshot === 'stitched') {
+    } else if (ctx.opts.screenshot === 'stitched') {
       await fullPageScreenshot(page, { path: filename }, quality);
     }
 
-    yield 'Optimizing screenshot...';
+    task.output = 'Optimizing screenshot...';
     // Give some time to flush the screenshot to disk
     await wait(500);
     await execAsync(
-      `"${mozjpeg}" -quality ${argv.screenshotQuality} -outfile "${filenameTemp}" "${filename}"`,
+      `"${mozjpeg}" -quality ${ctx.opts.screenshotQuality} -outfile "${filenameTemp}" "${filename}"`,
       { windowsHide: true }
     );
     await rename(filenameTemp, filename);
   }
 
-  if (argv.debug) {
-    yield 'Waiting for the browser to be closed manually...';
+  if (ctx.opts.debug) {
+    task.output = 'Waiting for the browser to be closed manually...';
     await browserDisconnected(browser);
   } else {
     await page.close();
-    await browser.close();
   }
 
-  return { pageTitle, filename };
+  ctx.pageTitle = pageTitle;
+  ctx.filename = filename;
 }
 
 function browserDisconnected(browser) {
@@ -257,6 +284,9 @@ function currentDate() {
   )}-${String(date.getUTCDate()).padStart(2, '0')}`;
 }
 
+/**
+ * @param {number} width
+ */
 function getGridTemplate(width) {
   if (width >= 1050) {
     return '"qr url ao at"';
@@ -272,11 +302,17 @@ function getGridTemplate(width) {
   return '"qr" "url" "ao" "at"';
 }
 
+/**
+ * @param {number} width
+ */
 function getGridGap(width) {
   if (width >= 650) return '24px';
   return '8px';
 }
 
+/**
+ * @param {string} title
+ */
 function titleToFilename(title) {
   const TITLE_REPLACEMENTS = {
     '"': '”',
@@ -297,6 +333,9 @@ function titleToFilename(title) {
   return sanitizeFilename(title);
 }
 
+/**
+ * @param {string} referrer
+ */
 function getReferrer(referrer) {
   if (!referrer) return;
 
@@ -312,6 +351,6 @@ function getReferrer(referrer) {
     new URL(referrer);
     return referrer;
   } catch (e) {
-    console.error(`--referrer (${referrer}) is not a valid URL, ignoring.`);
+    throw new Error(`--referrer (${referrer}) is not a valid URL, ignoring.`);
   }
 }

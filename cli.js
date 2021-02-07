@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 import { join } from 'path';
 import yargs from 'yargs';
-import ora from 'ora';
+import Listr from 'listr';
 import open from 'open';
 import { appendFileSync } from 'fs';
 import enquirer from 'enquirer';
 import screenshot from './src/screenshot.js';
-import archiveMethods from './src/archive.js';
+import archivers from './src/archive/archivers.js';
 import resolveStylesheet from './src/stylesheet.js';
 import addExifMetadata from './src/exif.js';
 import launchBrowser from './src/browser.js';
 import { VIEWPORT_WIDTH } from './src/util.js';
 
-const { argv } = yargs().options({
+const log = console.log;
+// @ts-ignore
+const { argv: yargsArgv } = yargs(process.argv.slice(2)).options({
   print: {
     type: 'boolean',
     describe: "Whether to use the page's print stylesheet",
@@ -106,152 +108,151 @@ const { argv } = yargs().options({
     describe:
       'screenshot: Debug the screenshotting process without saving files or archiving a URL.',
   },
+  url: { type: 'string', describe: 'URL to archive' },
 });
 
+/**
+ * @type {import('./src/types').ArchhiveOptions}
+ */
+// @ts-ignore
+const opts = yargsArgv;
+
 async function main() {
-  const originalArgv = { ...argv };
-  if (!argv.url) {
-    const extraArgs = argv._.join(' ');
+  const originalArgv = { ...opts };
+  if (!opts.url) {
+    // @ts-ignore
+    const extraArgs = opts._.join(' ');
     if (extraArgs) {
-      argv.url = extraArgs;
+      opts.url = extraArgs;
     } else {
-      argv.url = (
-        await enquirer.prompt({ type: 'input', message: 'URL:', name: 'url' })
-      ).url;
-      if (!argv.width) {
-        argv.width = (
-          await enquirer.prompt({
-            type: 'select',
-            message: 'Viewport:',
-            name: 'width',
-            choices: Object.keys(VIEWPORT_WIDTH),
-          })
-        ).width;
+      opts.url = /** @type {any} */ (await enquirer.prompt({
+        type: 'input',
+        message: 'URL:',
+        name: 'url',
+      })).url;
+      if (!opts.width) {
+        opts.width = /** @type {any} */ (await enquirer.prompt({
+          type: 'select',
+          message: 'Viewport:',
+          name: 'width',
+          choices: Object.keys(VIEWPORT_WIDTH),
+        })).width;
       }
     }
   }
 
-  if (!argv.width) argv.width = 'laptop';
+  if (!opts.width) opts.width = 'laptop';
 
-  if (argv.debug === 'screenshot') {
-    if (argv.aoUrl === 'auto') {
-      argv.aoUrl = 'archive.org/debug';
-      argv.shorturl = 'none';
+  if (opts.debug === 'screenshot') {
+    if (opts.aoUrl === 'auto') {
+      opts.aoUrl = 'archive.org/debug';
+      opts.shorturl = 'none';
     }
-    if (argv.atUrl === 'auto') argv.atUrl = 'archive.today/debug';
+    if (opts.atUrl === 'auto') opts.atUrl = 'archive.today/debug';
   }
 
   try {
-    new URL(argv.url);
+    new URL(opts.url);
   } catch (e) {
-    console.error('Invalid URL specified:', argv.url);
-    process.exit(1);
+    throw new Error(`Invalid URL specified: ${opts.url}`);
   }
-  const { cssFilename, stylesheet } = await resolveStylesheet(argv);
-  if (argv.debug) {
-    console.info(
+
+  const { cssFilename, stylesheet } = await resolveStylesheet(opts);
+  if (opts.debug) {
+    log(
       stylesheet
         ? `Using stylesheet: ${cssFilename}`
         : `Could not find stylesheet: ${cssFilename}`
     );
   }
 
-  let progress = ora().start(`Starting browser`);
-  const browser = await launchBrowser(argv);
-  process.on('SIGINT', async () => {
-    await browser.close();
-    process.exit();
+  /** @type {Listr<import('./src/types').TaskContext>}> */
+  const tasks = new Listr(
+    [
+      {
+        title: 'Start browser',
+        task: launchBrowser,
+      },
+      {
+        title: 'Archiving URL',
+        task(ctx, task) {
+          const archivingTasks = [];
+          for (const site in archivers) {
+            function retryableTask(...args) {
+              return archivers[site](...args)
+                .then((res) => {
+                  ctx.urls = { ...ctx.urls, ...res };
+                })
+                .catch(async (e) => {
+                  log(e);
+                  const retry = /** @type {any} */ (await enquirer.prompt({
+                    type: 'confirm',
+                    message: `${site} failed to archive ${opts.url}. Retry?`,
+                    name: 'retry',
+                    initial: true,
+                  })).retry;
+                  if (retry) {
+                    return retryableTask(...args);
+                  }
+                  throw e;
+                });
+            }
+            archivingTasks.push({
+              title: site,
+              task: retryableTask,
+            });
+          }
+
+          return new Listr(archivingTasks, { concurrent: true, exitOnError: true });
+        },
+      },
+      {
+        title: 'Screenshot',
+        task: screenshot,
+      },
+      {
+        title: 'EXIF Metadata',
+        skip() {
+          if (opts.debug === 'screenshot') {
+            return 'Debugging screenshot';
+          }
+        },
+        task: addExifMetadata,
+      },
+    ],
+    { exitOnError: true }
+  );
+
+  // @ts-ignore Partial context
+  const ctx = await tasks.run({
+    prompt: enquirer.prompt,
+    log,
+    opts,
+    stylesheet,
+    urls: { url: opts.url },
   });
+  await ctx.browser.close();
 
-  progress.prefixText = 'Archiving URL';
-  try {
-    let archiveUrls = { url: argv.url };
-    const activeArchiveMethods = [];
-    for (const { site, exec } of archiveMethods) {
-      function retryableMethod(args) {
-        return reportProgress(exec(args), progress).catch(async (e) => {
-          console.error(e);
-          const retry = (
-            await enquirer.prompt({
-              type: 'confirm',
-              message: `${site} failed to archive ${argv.url}. Retry?`,
-              name: 'retry',
-              initial: true,
-            })
-          ).retry;
-          if (retry) {
-            return retryableMethod(args);
-          } else throw e;
-        });
-      }
-      activeArchiveMethods.push(retryableMethod({ argv, browser }));
-    }
-
-    const archiveResults = await Promise.all(activeArchiveMethods);
-    for (const result of archiveResults) archiveUrls = { ...archiveUrls, ...result };
-
-    progress.prefixText = '';
-    progress.succeed(`Archiving URL`);
-    progress = ora().start('Screenshot');
-    const { pageTitle, filename } = await reportProgress(
-      screenshot({ argv, browser, archiveUrls, stylesheet }),
-      progress
+  log(`File: ${ctx.filename}`);
+  log(
+    `archive.org: ${ctx.urls.archiveOrgUrl}${
+      ctx.urls.archiveOrgShortUrl ? ` (${ctx.urls.archiveOrgShortUrl})` : ''
+    }`
+  );
+  log(`archive.today: ${ctx.urls.archiveTodayUrl}`);
+  if (opts.debug !== 'screenshot') {
+    await open(`file://${ctx.filename}`);
+    const launchArgv = process.argv.slice(2);
+    // Add --width and --url if they are specified via the CLI
+    if (!originalArgv.width) launchArgv.push('--width', opts.width);
+    if (!originalArgv.url) launchArgv.push(`"${opts.url}"`);
+    appendFileSync(
+      join(opts.outputDir, '.archhive_history'),
+      `${launchArgv.join(' ')} # ${new Date()}\n`
     );
-    if (argv.debug !== 'screenshot') {
-      await reportProgress(
-        addExifMetadata({ argv, pageTitle, filename, archiveUrls }),
-        progress
-      );
-    }
-
-    progress.succeed('Screenshot');
-    console.log(`File: ${filename}`);
-    console.log(
-      `archive.org: ${archiveUrls.archiveOrgUrl}${
-        archiveUrls.archiveOrgShortUrl ? ` (${archiveUrls.archiveOrgShortUrl})` : ''
-      }`
-    );
-    console.log(`archive.today: ${archiveUrls.archiveTodayUrl}`);
-    if (argv.debug !== 'screenshot') {
-      await open(`file://${filename}`);
-      const launchArgv = process.argv.slice(2);
-      // Add --width and --url if they are specified via the CLI
-      if (!originalArgv.width) launchArgv.push('--width', argv.width);
-      if (!originalArgv.url) launchArgv.push(`"${argv.url}"`);
-      appendFileSync(
-        join(argv.outputDir, '.archhive_history'),
-        `${launchArgv.join(' ')} # ${new Date()}\n`
-      );
-    }
-  } catch (e) {
-    console.error(e);
-    progress.fail(e.message);
   }
-
-  await browser.close();
 }
-
-try {
-  main();
-} catch (e) {
+main().catch((e) => {
+  log(e);
   process.exit(1);
-}
-
-async function reportProgress(iterator, progress) {
-  // This emulates for await of, but allows us to pass back the results of {prompt: ...} to yield
-  let item = await iterator.next();
-  while (!item.done) {
-    if (typeof item.value === 'string') {
-      progress.text = item.value;
-      item = await iterator.next();
-    } else {
-      if (item.value?.prompt) {
-        item = await iterator.next(await enquirer.prompt(item.value.prompt));
-      } else {
-        return item.value;
-      }
-    }
-  }
-
-  return item.value;
-}
+});
